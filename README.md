@@ -24,10 +24,10 @@ Nigeria faces significant connectivity challenges. Nexus solves this by integrat
 
 ## 🚀 Key Features
 
-1. **AskRX (Clip 6):** Multilingual AI pharmacist consultation with local Nigerian brand context.
-2. **AI Scanner (Clip 7):** On-device vision extraction for Grandma-friendly medicine discovery.
-3. **Smart Search (Clip 8):** Autonomous routing to real Benin City pharmacists.
-4. **WhatsApp Pipeline (Clip 9):** Transforming informal group messages into structured platform requests.
+1. **AskRX :** Multilingual AI pharmacist consultation with local Nigerian brand context.
+2. **AI Scanner :** On-device vision extraction for Grandma-friendly medicine discovery.
+3. **Smart Search :** Autonomous routing to real Benin City pharmacists.
+4. **WhatsApp Pipeline :** Transforming informal group messages into structured platform requests.
 
 ## 🛠️ Technical Stack
 
