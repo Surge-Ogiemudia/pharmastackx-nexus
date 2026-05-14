@@ -160,7 +160,7 @@ export function deduplicateResponse(text: string): string {
       unique.push(s);
     }
   }
-  return unique.join(' ').replace(/^["'\s]+/, '').trim();
+  return unique.join(' ').replace(/^["'\s]+|["'\s]+$/g, '').trim();
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
