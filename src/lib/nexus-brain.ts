@@ -746,6 +746,11 @@ function stripSystemLeaks(text: string): string {
 // The model outputs: [clean answer] then [*Wait,...* / *Let's...* reasoning] then repeats the answer.
 // Strategy: grab everything before the first asterisk-wrapped reasoning line.
 function stripThinking(text: string): string {
+  // Strategy 0: handle non-asterisked "Final Polish:", "Final Answer:" etc. labels
+  // Model sometimes outputs these as plain text headers without asterisk wrapping
+  const noAsteriskFinal = text.match(/(?:^|\n)\s*Final\s+(?:Polish|Answer|Version|Response|selection)\s*:?\s*\n?\s*([\s\S]{20,})/i);
+  if (noAsteriskFinal) return noAsteriskFinal[1].trim();
+
   // Fast path — no asterisk-wrapped lines at all
   if (!/^\s*\*/m.test(text)) return text.trim();
 

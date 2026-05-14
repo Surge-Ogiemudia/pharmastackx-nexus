@@ -141,12 +141,18 @@ function detectOffTopic(text: string): boolean {
 }
 
 export function deduplicateResponse(text: string): string {
-  const sentences = text.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter((s) => s.length > 0);
+  // Normalize: add a space wherever sentences are run together without one
+  // e.g. "headaches.Common" → "headaches. Common"  |  'occurrences."The' → 'occurrences. The'
+  const normalized = text
+    .replace(/([.!?]["']?)([A-Z])/g, '$1 $2')
+    .replace(/([.!?])(["])/g, '$1 $2');
+  const sentences = normalized.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter((s) => s.length > 0);
   const seenKeys = new Set<string>();
   const seenPrefixes = new Set<string>();
   const unique: string[] = [];
   for (const s of sentences) {
-    const key = s.toLowerCase().replace(/\s+/g, ' ').trim();
+    // Strip surrounding quotes before comparing so '"Sentence."' and 'Sentence.' match
+    const key = s.toLowerCase().replace(/\s+/g, ' ').replace(/^["']+|["']+$/g, '').trim();
     const prefix = key.substring(0, 50);
     if (!seenKeys.has(key) && !seenPrefixes.has(prefix)) {
       seenKeys.add(key);
@@ -154,7 +160,7 @@ export function deduplicateResponse(text: string): string {
       unique.push(s);
     }
   }
-  return unique.join(' ');
+  return unique.join(' ').replace(/^["'\s]+/, '').trim();
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
