@@ -59,6 +59,18 @@ function sortByBestDeal(arr: PharmacistResponse[]): PharmacistResponse[] {
 }
 
 export default function SearchPage() {
+  return (
+    <React.Suspense fallback={
+      <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Typography sx={{ color: '#64748B' }}>Loading search engine...</Typography>
+      </Box>
+    }>
+      <SearchContent />
+    </React.Suspense>
+  );
+}
+
+function SearchContent() {
   const [medicineName, setMedicineName] = useState('');
   const [strength, setStrength] = useState('');
   const [searchPhase, setSearchPhase] = useState<SearchPhase>('idle');

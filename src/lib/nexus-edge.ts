@@ -57,8 +57,9 @@ class NexusEdge {
   async checkWebGPU(): Promise<boolean> {
     if (typeof window === 'undefined') return false;
     try {
-      if (!navigator.gpu) return false;
-      const adapter = await navigator.gpu.requestAdapter();
+      const nav = navigator as any;
+      if (!nav.gpu) return false;
+      const adapter = await nav.gpu.requestAdapter();
       return !!adapter;
     } catch {
       return false;
@@ -88,7 +89,7 @@ class NexusEdge {
       const dir = await root.getDirectoryHandle(OPFS_DIR, { create: true });
       const fileHandle = await dir.getFileHandle(OPFS_FILE, { create: true });
       const writable = await fileHandle.createWritable();
-      await writable.write(data.buffer);
+      await (writable as any).write(data);
       await writable.close();
       nexusLogger.emit('SYSTEM', '💾 Model saved to device storage — future loads will skip the download');
     } catch (err) {

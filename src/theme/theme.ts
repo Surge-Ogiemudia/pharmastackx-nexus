@@ -68,17 +68,17 @@ export const theme = createTheme({
   components: {
     MuiButton: {
       styleOverrides: {
-        root: {
+        root: ({ ownerState }: any) => ({
           borderRadius: 8,
           textTransform: 'none',
           fontWeight: 600,
-        },
-        containedPrimary: {
-          backgroundColor: '#1B5E20',
-          '&:hover': {
-            backgroundColor: '#2E7D32',
-          },
-        },
+          ...(ownerState.variant === 'contained' && ownerState.color === 'primary' && {
+            backgroundColor: '#1B5E20',
+            '&:hover': {
+              backgroundColor: '#2E7D32',
+            },
+          }),
+        }),
       },
     },
     MuiCard: {
