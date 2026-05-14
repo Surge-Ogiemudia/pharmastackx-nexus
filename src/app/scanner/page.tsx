@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Box,
   Typography,
@@ -20,6 +20,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import SearchIcon from '@mui/icons-material/Search';
 import ErrorOutlinedIcon from '@mui/icons-material/ErrorOutlined';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import CloseIcon from '@mui/icons-material/Close';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNexusBrain } from '@/components/NexusBrainProvider';
 import type { Medicine } from '@/lib/nexus-brain';
@@ -68,20 +69,27 @@ export default function ScannerPage() {
       img.src = dataUrl;
     });
 
+  // Attach stream once the <video> element is in the DOM (showCamera=true mounts it)
+  useEffect(() => {
+    if (showCamera && streamRef.current && videoRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => {/* some browsers block autoplay — user gesture already happened */});
+    }
+  }, [showCamera]);
+
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: 1280, height: 720 },
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
       });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-      setShowCamera(true);
       setCapturedImage(null);
       setResults([]);
-    } catch (err) {
+      setScanError(null);
+      setShowCamera(true); // mount <video> first; useEffect above assigns srcObject
+    } catch {
       logger.emit('ERROR', 'Camera access denied or unavailable');
+      setScanError('Camera access denied — please allow camera permission and try again.');
     }
   };
 
@@ -309,36 +317,56 @@ export default function ScannerPage() {
 
         {/* Camera View */}
         {showCamera && (
-          <Box sx={{ position: 'relative', borderRadius: '12px', overflow: 'hidden' }}>
+          <Box sx={{
+            position: 'relative',
+            borderRadius: '12px',
+            overflow: 'hidden',
+            bgcolor: '#000',
+            // On mobile fill most of the viewport height
+            minHeight: { xs: 'calc(100dvh - 200px)', md: 320 },
+            maxHeight: { xs: 'calc(100dvh - 160px)', md: 480 },
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}>
             <video
               ref={videoRef}
               autoPlay
               playsInline
               muted
-              style={{ width: '100%', maxHeight: 400, objectFit: 'cover', borderRadius: '12px' }}
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
             />
-            <Box
+
+            {/* Close / cancel button */}
+            <IconButton
+              onClick={stopCamera}
               sx={{
-                position: 'absolute',
-                bottom: 16,
-                left: '50%',
-                transform: 'translateX(-50%)',
-                display: 'flex',
-                gap: 2,
+                position: 'absolute', top: 12, right: 12,
+                bgcolor: 'rgba(0,0,0,0.55)',
+                color: '#fff',
+                backdropFilter: 'blur(4px)',
+                '&:hover': { bgcolor: 'rgba(0,0,0,0.8)' },
               }}
             >
+              <CloseIcon />
+            </IconButton>
+
+            {/* Capture button */}
+            <Box sx={{
+              position: 'absolute', bottom: 20,
+              left: '50%', transform: 'translateX(-50%)',
+            }}>
               <IconButton
                 onClick={capturePhoto}
                 sx={{
-                  width: 64,
-                  height: 64,
-                  bgcolor: '#4ADE80',
-                  color: '#fff',
+                  width: 68, height: 68,
+                  bgcolor: '#4ADE80', color: '#fff',
+                  border: '4px solid rgba(255,255,255,0.3)',
                   '&:hover': { bgcolor: '#22C55E' },
-                  boxShadow: '0 0 20px rgba(74,222,128,0.4)',
+                  boxShadow: '0 0 24px rgba(74,222,128,0.5)',
                 }}
               >
-                <CameraAltIcon sx={{ fontSize: 28 }} />
+                <CameraAltIcon sx={{ fontSize: 30 }} />
               </IconButton>
             </Box>
           </Box>
