@@ -19,14 +19,12 @@ function AppShell({ children }: { children: React.ReactNode }) {
     <Box sx={{
       display: 'flex',
       flexDirection: 'column',
-      // 100dvh accounts for mobile browser chrome (address bar) shrinking/expanding
       height: '100dvh',
       width: '100vw',
       overflow: 'hidden',
     }}>
-      {/* Main row: sidebar (desktop) + content + DevConsole (desktop) */}
+      {/* Main row: sidebar (desktop) + content + DevConsole side panel (desktop) */}
       <Box sx={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
-        {/* Navigation renders sidebar on desktop, fixed bottom bar on mobile */}
         <Navigation />
 
         <Box sx={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
@@ -46,7 +44,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
             </AnimatePresence>
           </Box>
 
-          {/* Dev Console — desktop only */}
+          {/* Dev Console — side panel, desktop only */}
           {demoMode && (
             <Box sx={{
               display: { xs: 'none', md: 'flex' },
@@ -60,13 +58,27 @@ function AppShell({ children }: { children: React.ReactNode }) {
         </Box>
       </Box>
 
-      {/* Bottom spacer — same height as the mobile bottom nav.
-          Pushes all page content up so nothing slides behind the fixed bar. */}
-      <Box sx={{
-        flexShrink: 0,
-        display: { xs: 'block', md: 'none' },
-        height: 56,
-      }} />
+      {/* Spacer that matches the mobile bottom nav height so content never
+          slides under it. Hidden on desktop. */}
+      <Box sx={{ flexShrink: 0, display: { xs: 'block', md: 'none' }, height: 56 }} />
+
+      {/* Dev Console — full-screen overlay on mobile when Console is toggled.
+          zIndex 1200 sits below the bottom nav (1300) so the Console button
+          stays tappable and acts as the dismiss button. */}
+      {demoMode && (
+        <Box sx={{
+          display: { xs: 'flex', md: 'none' },
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 56,
+          zIndex: 1200,
+          flexDirection: 'column',
+        }}>
+          <DevConsole />
+        </Box>
+      )}
     </Box>
   );
 }
