@@ -61,10 +61,11 @@ export default function WhatsAppPage() {
       logger.emit('SYSTEM', `📩 Received WhatsApp message from group: Young Pharmacists Group, Edo State Chapter`);
       logger.emit('INTENT', `🎯 Classifying message type...`);
 
-      const medicines = await brain.extractMedicines(
+      const scanResult = await brain.extractMedicines(
         { type: 'whatsapp', text: message },
         'WHATSAPP_CLASSIFY'
       );
+      const medicines = scanResult.medicines;
 
       const classification: ClassificationResult = {
         isDrugRequest: medicines.length > 0,

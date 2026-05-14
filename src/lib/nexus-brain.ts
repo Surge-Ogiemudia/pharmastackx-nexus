@@ -6,6 +6,17 @@
 import { nexusLogger } from './nexus-logger';
 import { cloudInfer, cloudVisionInfer } from './nexus-cloud';
 import { nexusEdge } from './nexus-edge';
+import {
+  validateResponse,
+  buildRetrySystemPrompt,
+  buildGuardedSystemPrompt,
+  trackResponse,
+  logFailure,
+  logCorrectionResult,
+  logScannerResult,
+  type FailurePattern,
+  type ScanSafetyReport,
+} from './nexus-safety';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -51,6 +62,18 @@ export interface NexusResponse {
   matches?: PharmacistMatch[];
   confidence?: number;
   mode: 'cloud' | 'edge';
+}
+
+export interface ConsultResult {
+  text: string;
+  flagged: boolean;
+  patternsDetected: FailurePattern[];
+  corrected: boolean;
+}
+
+export interface ScanResult {
+  medicines: Medicine[];
+  safetyReport?: ScanSafetyReport;
 }
 
 // ── Prompts ──────────────────────────────────────────────────────────────────
@@ -213,7 +236,7 @@ Category:`;
 
   // ── Medicine Extraction ──
 
-  async extractMedicines(input: NexusInput, intent: NexusIntent): Promise<Medicine[]> {
+  async extractMedicines(input: NexusInput, intent: NexusIntent): Promise<ScanResult> {
     nexusLogger.emit('EXTRACT', '💊 Extracting medicine data...');
 
     if (intent === 'SCAN_MEDICINE' && input.image) {
@@ -225,21 +248,21 @@ Category:`;
     }
 
     if (intent === 'WHATSAPP_CLASSIFY' && input.text) {
-      return this.extractFromWhatsApp(input.text);
+      const medicines = await this.extractFromWhatsApp(input.text);
+      return { medicines };
     }
 
-    return [];
+    return { medicines: [] };
   }
 
   private async extractFromImage(
     imageBase64: string,
     mimeType: string,
     type: 'medicine' | 'prescription'
-  ): Promise<Medicine[]> {
+  ): Promise<ScanResult> {
     nexusLogger.emit('INFERENCE', `⚡ Sending image to Gemma 4 Vision (${type} scan)...`);
     const start = performance.now();
 
-    // Run server-side (no client timeout, better JSON parsing, mirrors the main PharmaStackX app)
     const route = type === 'medicine' ? '/api/scan-med' : '/api/scan-rx';
     const res = await fetch(route, {
       method: 'POST',
@@ -257,12 +280,21 @@ Category:`;
 
     const data = await res.json();
     const medicines: Medicine[] = data.medicines || [];
+    const safetyReport: ScanSafetyReport | undefined = data.safetyReport;
 
     medicines.forEach((m) => {
       nexusLogger.emit('EXTRACT', `💊 Found: ${m.name} ${m.strength} ${m.form} × ${m.quantity}`);
     });
 
-    return medicines;
+    if (safetyReport) {
+      const confColor = safetyReport.confidence === 'High' ? '🟢' : safetyReport.confidence === 'Medium' ? '🟡' : '🔴';
+      nexusLogger.emit('SYSTEM', `🛡️ Scanner safety: ${confColor} ${safetyReport.confidence} confidence${safetyReport.flags.length ? ' — ' + safetyReport.flags.join(', ') : ''}`);
+      if (safetyReport.confidence !== 'High') {
+        logScannerResult(safetyReport);
+      }
+    }
+
+    return { medicines, safetyReport };
   }
 
   private async extractFromWhatsApp(text: string): Promise<Medicine[]> {
@@ -302,7 +334,7 @@ Category:`;
 
   // ── Consultation (AskRX) ──
 
-  async consult(message: string, history?: Array<{ role: string; text: string }>): Promise<string> {
+  async consult(message: string, history?: Array<{ role: string; text: string }>): Promise<ConsultResult> {
     nexusLogger.emit('INTENT', '🎯 Intent: CONSULTATION — processing health question...');
     nexusLogger.emit('INFERENCE', `⚡ Generating response for: "${message.substring(0, 60)}..."`);
 
@@ -312,11 +344,11 @@ Category:`;
       ? history.slice(-6).map((h) => `${h.role === 'user' ? 'User' : 'Pharmacist'}: ${h.text}`).join('\n') + '\n'
       : '';
 
-    // "User:/Pharmacist:" format — prevents the model from generating fake follow-up Q&A pairs
     const prompt = `${contextMessages}User: ${message}\nPharmacist:`;
+    const guardedSystem = buildGuardedSystemPrompt(ASKRX_SYSTEM);
 
     const response = await this.infer(prompt, {
-      systemPrompt: ASKRX_SYSTEM,
+      systemPrompt: guardedSystem,
       temperature: 0.4,
       maxTokens: 180,
       allowEdgeFallback: true,
@@ -327,10 +359,58 @@ Category:`;
     nexusLogger.emit('INFERENCE', `⚡ Response generated in ${duration}ms`, undefined, duration);
 
     const clean = stripSystemLeaks(stripThinking(response));
+    trackResponse();
+
     if (!clean || clean.length < 5) {
-      return "That's outside pharmacy — see a physician.";
+      return { text: "That's outside pharmacy — see a physician.", flagged: false, patternsDetected: [], corrected: false };
     }
-    return clean;
+
+    const validation = validateResponse(clean, 'askrx');
+
+    if (!validation.passed) {
+      logFailure({
+        feature: 'askrx',
+        patterns: validation.patterns,
+        trigger: message,
+        bad_output_sample: clean,
+        auto_detected: true,
+      });
+
+      const isCritical = validation.patterns.includes('thinking_leak') || validation.patterns.includes('double_response');
+
+      if (isCritical) {
+        nexusLogger.emit('SYSTEM', `🛡️ Safety: ${validation.patterns.join(' + ')} detected — retrying with self-correction...`);
+        try {
+          const retrySystem = buildRetrySystemPrompt(guardedSystem, validation.patterns);
+          const retryResponse = await this.infer(prompt, {
+            systemPrompt: retrySystem,
+            temperature: 0.3,
+            maxTokens: 180,
+            allowEdgeFallback: true,
+            edgeSystemPrompt: ASKRX_EDGE_SYSTEM,
+          });
+          const retryClean = stripSystemLeaks(stripThinking(retryResponse));
+          if (retryClean.length >= 5) {
+            const retryValidation = validateResponse(retryClean, 'askrx');
+            logCorrectionResult(retryValidation.passed, 'askrx', validation.patterns);
+            nexusLogger.emit('SYSTEM', `🛡️ Self-correction ${retryValidation.passed ? 'successful ✓' : 'partial — response flagged'}`);
+            return {
+              text: retryClean,
+              flagged: !retryValidation.passed,
+              patternsDetected: validation.patterns,
+              corrected: true,
+            };
+          }
+        } catch {
+          // Retry failed — fall through to flagged response
+        }
+        logCorrectionResult(false, 'askrx', validation.patterns);
+      }
+
+      return { text: clean, flagged: true, patternsDetected: validation.patterns, corrected: false };
+    }
+
+    return { text: clean, flagged: false, patternsDetected: [], corrected: false };
   }
 
   // ── Voice Transcript Correction ──
@@ -383,7 +463,7 @@ English:`;
     imageBase64: string,
     mimeType: string,
     history?: Array<{ role: string; text: string }>
-  ): Promise<string> {
+  ): Promise<ConsultResult> {
     nexusLogger.emit('INTENT', '🎯 Intent: CONSULTATION (Vision) — image + question...');
     nexusLogger.emit('INFERENCE', `⚡ Generating vision response for: "${message.substring(0, 60)}..." [+ image]`);
 
@@ -396,25 +476,30 @@ English:`;
 
     try {
       const response = await cloudVisionInfer(prompt, imageBase64, mimeType, {
-        systemPrompt: ASKRX_SYSTEM,
+        systemPrompt: buildGuardedSystemPrompt(ASKRX_SYSTEM),
         temperature: 0.4,
         maxTokens: 250,
       });
       const duration = Math.round(performance.now() - start);
       nexusLogger.emit('INFERENCE', `⚡ Vision response generated in ${duration}ms`, undefined, duration);
       const clean = stripSystemLeaks(stripThinking(response));
-      return clean.length > 5 ? clean : "I can see the image but couldn't extract clear information — try a clearer or closer photo.";
+      trackResponse();
+      if (clean.length <= 5) {
+        return { text: "I can see the image but couldn't extract clear information — try a clearer or closer photo.", flagged: false, patternsDetected: [], corrected: false };
+      }
+      const validation = validateResponse(clean, 'askrx');
+      if (!validation.passed) {
+        logFailure({ feature: 'askrx', patterns: validation.patterns, trigger: message || 'vision query', bad_output_sample: clean, auto_detected: true });
+      }
+      return { text: clean, flagged: !validation.passed, patternsDetected: validation.patterns, corrected: false };
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       nexusLogger.emit('ERROR', `Vision failed: ${errMsg.substring(0, 80)}`);
-      // Don't fall back to text consult — "What is this?" makes no sense without the image.
-      // Give a clear, helpful message so the user knows what to do next.
       if (message && message !== 'What is this?') {
-        // They asked a specific question alongside the image — answer it without vision
         nexusLogger.emit('SYSTEM', '📱 Vision unavailable — answering text question only...');
         return this.consult(message, history);
       }
-      return "I couldn't analyse the image right now — please type the drug name and your question and I'll help immediately.";
+      return { text: "I couldn't analyse the image right now — please type the drug name and your question and I'll help immediately.", flagged: false, patternsDetected: [], corrected: false };
     }
   }
 
@@ -574,7 +659,7 @@ Return ONLY valid JSON — no markdown, no explanation:
 
   private extractJSON(text: string): string {
     // Strip markdown code fences
-    let cleaned = text.replace(/```json|```/gi, '').trim();
+    const cleaned = text.replace(/```json|```/gi, '').trim();
 
     // Find the first { or [ and match its closing bracket
     const firstBrace = cleaned.indexOf('{');
@@ -656,7 +741,7 @@ function stripThinking(text: string): string {
 
   // Strategy 2: content after the last "Final Version:" / "Final selection:" / "Final Polish:" block
   const finalMatch = text.match(/\*\s*Final\s+(?:Version|selection|Polish)\s*:?\*?\s*([\s\S]+?)(?=\n\s*\*|$)/i);
-  if (finalMatch?.[1]?.trim().length > 20) return finalMatch[1].trim();
+  if ((finalMatch?.[1]?.trim().length ?? 0) > 20) return finalMatch![1].trim();
 
   // Strategy 3: last clean paragraph with no asterisks
   const paragraphs = text.split(/\n{2,}/);

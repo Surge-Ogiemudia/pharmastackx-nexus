@@ -1,0 +1,104 @@
+{
+  "failures": [
+    {
+      "id": "f001",
+      "timestamp": "2025-05-10T14:23:11.000Z",
+      "feature": "askrx",
+      "pattern": "thinking_leak",
+      "trigger": "What is the maximum dose of omeprazole per day?",
+      "bad_output_sample": "*Let me think about this. Omeprazole is a PPI. The standard dose is 20mg daily but can go up to 40mg for GERD...*\n\nOmeprazole maximum daily dose is 40mg for most indications.",
+      "correction_applied": true,
+      "auto_detected": true
+    },
+    {
+      "id": "f002",
+      "timestamp": "2025-05-10T15:47:33.000Z",
+      "feature": "askrx",
+      "pattern": "double_response",
+      "trigger": "How do I take metronidazole for typhoid?",
+      "bad_output_sample": "Metronidazole is not first-line for typhoid — use ciprofloxacin 500mg twice daily for 10-14 days.\n\nMetronidazole is not first-line for typhoid — use ciprofloxacin 500mg twice daily for 10-14 days.",
+      "correction_applied": true,
+      "auto_detected": true
+    },
+    {
+      "id": "f003",
+      "timestamp": "2025-05-10T16:12:05.000Z",
+      "feature": "askrx",
+      "pattern": "preamble",
+      "trigger": "Can I give amoxicillin to my 3-year-old?",
+      "bad_output_sample": "Of course! Amoxicillin is commonly prescribed for children. The paediatric dose is 25-45mg/kg/day in 2-3 divided doses.",
+      "correction_applied": true,
+      "auto_detected": true
+    },
+    {
+      "id": "f004",
+      "timestamp": "2025-05-10T17:03:22.000Z",
+      "feature": "askrx",
+      "pattern": "disclaimer",
+      "trigger": "What should I take for malaria symptoms?",
+      "bad_output_sample": "For malaria symptoms, I strongly recommend seeking professional medical advice immediately. You should consult a doctor or visit a healthcare facility for proper diagnosis.",
+      "correction_applied": true,
+      "auto_detected": true
+    },
+    {
+      "id": "f005",
+      "timestamp": "2025-05-11T09:18:44.000Z",
+      "feature": "askrx",
+      "pattern": "thinking_leak",
+      "trigger": "Is it safe to take ibuprofen with high blood pressure?",
+      "bad_output_sample": "*I need to consider the pharmacology here. NSAIDs like ibuprofen can raise BP by causing sodium retention and reducing the effectiveness of antihypertensives.*\n\nAvoid ibuprofen if you have hypertension.",
+      "correction_applied": true,
+      "auto_detected": true
+    },
+    {
+      "id": "f006",
+      "timestamp": "2025-05-11T10:45:09.000Z",
+      "feature": "askrx",
+      "pattern": "excessive_length",
+      "trigger": "What is the dose of amlodipine?",
+      "bad_output_sample": "Amlodipine is a calcium channel blocker used for hypertension and angina. The starting dose is typically 5mg once daily. After 7-14 days, if blood pressure remains uncontrolled, the dose can be increased to 10mg once daily. The maximum dose is 10mg per day. It should be taken at the same time each day. Common side effects include ankle swelling, flushing, and headache.",
+      "correction_applied": false,
+      "auto_detected": true
+    },
+    {
+      "id": "f007",
+      "timestamp": "2025-05-11T11:30:17.000Z",
+      "feature": "scanner",
+      "pattern": "hallucination",
+      "trigger": "Blurry image of Amlodipine 5mg tablet strip",
+      "bad_output_sample": "{\"name\": \"Amitriptyline\", \"strength\": \"5mg\", \"form\": \"Tablet\", \"quantity\": 30}",
+      "correction_applied": false,
+      "auto_detected": true
+    },
+    {
+      "id": "f008",
+      "timestamp": "2025-05-11T13:22:51.000Z",
+      "feature": "whatsapp",
+      "pattern": "hallucination",
+      "trigger": "pls do we have coartem in stock",
+      "bad_output_sample": "{\"medicines\": [{\"name\": \"Coartem\", \"strength\": \"80/480mg\", \"quantity\": 24}], \"location\": \"Lagos\", \"confidence\": 0.95}",
+      "correction_applied": false,
+      "auto_detected": false
+    },
+    {
+      "id": "f009",
+      "timestamp": "2025-05-12T08:05:33.000Z",
+      "feature": "askrx",
+      "pattern": "double_response",
+      "trigger": "What are the side effects of metformin?",
+      "bad_output_sample": "Metformin causes nausea, diarrhoea, and stomach upset — take with food. Rare but serious: lactic acidosis in renal impairment.\n\nMetformin causes nausea, diarrhoea, and stomach upset — take with food.",
+      "correction_applied": true,
+      "auto_detected": true
+    },
+    {
+      "id": "f010",
+      "timestamp": "2025-05-12T14:44:28.000Z",
+      "feature": "askrx",
+      "pattern": "thinking_leak",
+      "trigger": "How long should I take augmentin?",
+      "bad_output_sample": "*Let me reconsider the standard treatment duration for Augmentin. For most infections the course is 5-7 days...*\n\nAugmentin: standard course is 5-7 days for mild infections, 10-14 days for severe or deep-seated infections.",
+      "correction_applied": true,
+      "auto_detected": true
+    }
+  ]
+}

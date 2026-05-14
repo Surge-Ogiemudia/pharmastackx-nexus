@@ -4,12 +4,14 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import { nexusBrain } from '@/lib/nexus-brain';
 import { nexusLogger, type NexusLogEntry } from '@/lib/nexus-logger';
 import { nexusEdge, type EdgeStatus } from '@/lib/nexus-edge';
+import { onSafetyUpdate, getStats as getSafetyStats, type SafetyStats } from '@/lib/nexus-safety';
 
 interface NexusBrainContextValue {
   brain: typeof nexusBrain;
   logger: typeof nexusLogger;
   logs: NexusLogEntry[];
   stats: ReturnType<typeof nexusLogger.getStats>;
+  safetyStats: SafetyStats;
   edgeStatus: EdgeStatus;
   edgeProgress: number;
   edgeDownloadedMB: number;
@@ -28,6 +30,7 @@ const NexusBrainContext = createContext<NexusBrainContextValue | null>(null);
 export function NexusBrainProvider({ children }: { children: React.ReactNode }) {
   const [logs, setLogs] = useState<NexusLogEntry[]>([]);
   const [stats, setStats] = useState(nexusLogger.getStats());
+  const [safetyStats, setSafetyStats] = useState<SafetyStats>(getSafetyStats());
   const [edgeStatus, setEdgeStatus] = useState<EdgeStatus>('uninitialized');
   const [edgeProgress, setEdgeProgress] = useState(0);
   const [edgeDownloadedMB, setEdgeDownloadedMB] = useState(0);
@@ -43,6 +46,11 @@ export function NexusBrainProvider({ children }: { children: React.ReactNode }) 
       setStats(nexusLogger.getStats());
     });
     return unsubscribe;
+  }, []);
+
+  // Subscribe to safety updates
+  useEffect(() => {
+    return onSafetyUpdate(setSafetyStats);
   }, []);
 
   // Subscribe to edge status
@@ -111,6 +119,7 @@ export function NexusBrainProvider({ children }: { children: React.ReactNode }) 
         logger: nexusLogger,
         logs,
         stats,
+        safetyStats,
         edgeStatus,
         edgeProgress,
         edgeDownloadedMB,

@@ -46,6 +46,20 @@ function extractPrescriptionJSON(text: string): object[] {
   return Array.isArray(parsed) ? parsed : [parsed];
 }
 
+function computeConfidence(med: Record<string, unknown>): number {
+  let score = 0;
+  const name = String(med.name ?? '');
+  const strength = String(med.strength ?? '');
+  const form = String(med.form ?? '');
+  const quantity = Number(med.quantity ?? 0);
+  if (name.length >= 3) score += 2;
+  if (/^[A-Za-z\s\-().]+$/.test(name)) score += 1;
+  if (/\d+\s*(mg|ml|g|mcg|iu|%)/i.test(strength)) score += 2; else if (strength.length > 0) score += 1;
+  if (['Tablet', 'Capsule', 'Syrup', 'Injection', 'Cream', 'Inhaler'].includes(form)) score += 1;
+  if (quantity > 0 && quantity <= 500) score += 1;
+  return score;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { image } = await req.json();
@@ -56,7 +70,18 @@ export async function POST(req: NextRequest) {
     const result = await model.generateContent([PROMPT, { inlineData: { data: base64Data, mimeType: 'image/jpeg' } }]);
     const text = result.response.text();
     const medicines = extractPrescriptionJSON(text);
-    return NextResponse.json({ medicines });
+
+    const scores = (medicines as Record<string, unknown>[]).map(computeConfidence);
+    const minScore = Math.min(...scores);
+    const confidence: 'High' | 'Medium' | 'Low' = minScore >= 6 ? 'High' : minScore >= 3 ? 'Medium' : 'Low';
+    const flags: string[] = [];
+    if (medicines.length === 0) flags.push('no medicines extracted');
+    if (confidence === 'Low') flags.push('one or more medicines have low extraction confidence');
+
+    return NextResponse.json({
+      medicines,
+      safetyReport: { confidence, verifyWithPharmacist: confidence !== 'High', flags },
+    });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     return NextResponse.json({ error: msg }, { status: 500 });

@@ -18,8 +18,11 @@ import LocalPharmacyIcon from '@mui/icons-material/LocalPharmacy';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import CloseIcon from '@mui/icons-material/Close';
 import MicIcon from '@mui/icons-material/Mic';
+import ThumbDownOutlinedIcon from '@mui/icons-material/ThumbDownOutlined';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNexusBrain } from '@/components/NexusBrainProvider';
+import { reportFeedback, type FailurePattern } from '@/lib/nexus-safety';
+import type { ConsultResult } from '@/lib/nexus-brain';
 
 interface Message {
   id: string;
@@ -27,6 +30,8 @@ interface Message {
   text: string;
   imagePreview?: string;
   timestamp: Date;
+  flagged?: boolean;
+  patternsDetected?: FailurePattern[];
 }
 
 const SUGGESTED_QUESTIONS = [
@@ -228,22 +233,23 @@ export default function AskRXPage() {
       const history = messages
         .filter((m) => (m.role === 'user' || m.role === 'ai') && m.text.length > 3)
         .map((m) => ({ role: m.role === 'user' ? 'user' : 'model', text: m.text }));
-      const response = image
+      const result: ConsultResult = image
         ? await brain.consultWithImage(messageText || 'What is this?', image.base64, image.mimeType, history)
         : await brain.consult(messageText, history);
       const aiMsg: Message = {
         id: `ai_${Date.now()}`,
         role: 'ai',
-        text: response,
+        text: result.text,
         timestamp: new Date(),
+        flagged: result.flagged,
+        patternsDetected: result.patternsDetected,
       };
       setMessages((prev) => [...prev, aiMsg]);
 
-      // Also stream AI responses to pharmacist so they see the full picture
       if (channelRef.current && pharmacistJoined) {
         channelRef.current.postMessage({
           type: 'ai_message',
-          text: response,
+          text: result.text,
           timestamp: new Date().toISOString(),
         });
       }
@@ -594,9 +600,28 @@ export default function AskRXPage() {
 
 // ── Shared message bubble ──
 
+const FEEDBACK_OPTIONS: { pattern: FailurePattern; label: string }[] = [
+  { pattern: 'double_response', label: 'Double response' },
+  { pattern: 'thinking_leak', label: 'Thinking leaked into reply' },
+  { pattern: 'hallucination', label: 'Wrong medicine / wrong dose' },
+  { pattern: 'off_topic', label: 'Off topic / not useful' },
+  { pattern: 'excessive_length', label: 'Too long' },
+];
+
 function MessageBubble({ msg, onConnect }: { msg: Message; onConnect?: () => void }) {
   const isUser = msg.role === 'user';
   const isPharmacist = msg.role === 'pharmacist';
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [selectedPattern, setSelectedPattern] = useState<FailurePattern | null>(null);
+  const [feedbackDone, setFeedbackDone] = useState(false);
+
+  const submitFeedback = () => {
+    if (!selectedPattern) return;
+    reportFeedback('askrx', selectedPattern, msg.text.substring(0, 150));
+    setFeedbackOpen(false);
+    setFeedbackDone(true);
+    setSelectedPattern(null);
+  };
 
   return (
     <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start', flexDirection: isUser ? 'row-reverse' : 'row' }}>
@@ -621,7 +646,7 @@ function MessageBubble({ msg, onConnect }: { msg: Message; onConnect?: () => voi
           px: 2, py: 1.5,
           borderRadius: isUser ? '16px 4px 16px 16px' : '4px 16px 16px 16px',
           bgcolor: isUser ? 'rgba(96,165,250,0.1)' : isPharmacist ? 'rgba(0,229,160,0.06)' : 'rgba(255,255,255,0.04)',
-          border: `1px solid ${isUser ? 'rgba(96,165,250,0.15)' : isPharmacist ? 'rgba(0,229,160,0.2)' : 'rgba(255,255,255,0.06)'}`,
+          border: `1px solid ${isUser ? 'rgba(96,165,250,0.15)' : isPharmacist ? 'rgba(0,229,160,0.2)' : msg.flagged ? 'rgba(251,191,36,0.25)' : 'rgba(255,255,255,0.06)'}`,
         }}>
           {msg.imagePreview && (
             <Box
@@ -634,10 +659,40 @@ function MessageBubble({ msg, onConnect }: { msg: Message; onConnect?: () => voi
           <Typography variant="body2" sx={{ color: '#E0F2F1', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
             {msg.text}
           </Typography>
-          <Typography sx={{ fontSize: '0.6rem', color: '#475569', mt: 0.5, textAlign: isUser ? 'right' : 'left' }}>
-            {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: isUser ? 'flex-end' : 'space-between', mt: 0.5 }}>
+            <Typography sx={{ fontSize: '0.6rem', color: '#475569' }}>
+              {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </Typography>
+            {msg.role === 'ai' && !isUser && !feedbackDone && (
+              <IconButton
+                size="small"
+                onClick={() => setFeedbackOpen(true)}
+                title="Flag this response"
+                sx={{ ml: 'auto', p: 0.25, color: '#334155', '&:hover': { color: '#FBBF24' } }}
+              >
+                <ThumbDownOutlinedIcon sx={{ fontSize: 12 }} />
+              </IconButton>
+            )}
+            {msg.role === 'ai' && feedbackDone && (
+              <Typography sx={{ fontSize: '0.6rem', color: '#475569', ml: 'auto' }}>feedback logged</Typography>
+            )}
+          </Box>
         </Box>
+
+        {/* Safety badge */}
+        {msg.role === 'ai' && msg.flagged && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, px: 1, py: 0.5, borderRadius: '6px', bgcolor: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.15)' }}>
+            <Typography sx={{ fontSize: '0.6rem' }}>⚠️</Typography>
+            <Typography sx={{ fontSize: '0.62rem', color: '#FBBF24', fontWeight: 600 }}>
+              AI response flagged for review
+            </Typography>
+            {msg.patternsDetected && msg.patternsDetected.length > 0 && (
+              <Typography sx={{ fontSize: '0.58rem', color: '#64748B' }}>
+                ({msg.patternsDetected.join(', ')})
+              </Typography>
+            )}
+          </Box>
+        )}
 
         {msg.role === 'ai' && onConnect && (
           <Button
@@ -657,6 +712,74 @@ function MessageBubble({ msg, onConnect }: { msg: Message; onConnect?: () => voi
           </Button>
         )}
       </Box>
+
+      {/* Feedback modal */}
+      {feedbackOpen && (
+        <Box
+          sx={{
+            position: 'fixed', inset: 0, zIndex: 1300,
+            bgcolor: 'rgba(0,0,0,0.6)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            p: 2,
+          }}
+          onClick={() => setFeedbackOpen(false)}
+        >
+          <Box
+            onClick={(e) => e.stopPropagation()}
+            sx={{
+              bgcolor: '#0D1526', border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '16px', p: 2.5, maxWidth: 340, width: '100%',
+            }}
+          >
+            <Typography sx={{ fontWeight: 700, color: '#E0F2F1', mb: 0.5, fontSize: '0.95rem' }}>
+              What went wrong?
+            </Typography>
+            <Typography sx={{ color: '#64748B', fontSize: '0.75rem', mb: 1.5 }}>
+              Your feedback helps improve Gemma 4 responses.
+            </Typography>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75, mb: 2 }}>
+              {FEEDBACK_OPTIONS.map(({ pattern, label }) => (
+                <Box
+                  key={pattern}
+                  onClick={() => setSelectedPattern(pattern)}
+                  sx={{
+                    px: 1.5, py: 1, borderRadius: '8px', cursor: 'pointer',
+                    border: `1px solid ${selectedPattern === pattern ? 'rgba(192,132,252,0.5)' : 'rgba(255,255,255,0.07)'}`,
+                    bgcolor: selectedPattern === pattern ? 'rgba(192,132,252,0.08)' : 'transparent',
+                    transition: 'all 0.15s',
+                    '&:hover': { borderColor: 'rgba(192,132,252,0.3)', bgcolor: 'rgba(192,132,252,0.04)' },
+                  }}
+                >
+                  <Typography sx={{ fontSize: '0.82rem', color: selectedPattern === pattern ? '#C084FC' : '#94A3B8', fontWeight: selectedPattern === pattern ? 600 : 400 }}>
+                    {label}
+                  </Typography>
+                </Box>
+              ))}
+            </Box>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Button
+                fullWidth
+                variant="outlined"
+                size="small"
+                onClick={() => setFeedbackOpen(false)}
+                sx={{ borderColor: 'rgba(255,255,255,0.1)', color: '#64748B', textTransform: 'none', fontSize: '0.8rem' }}
+              >
+                Cancel
+              </Button>
+              <Button
+                fullWidth
+                variant="contained"
+                size="small"
+                disabled={!selectedPattern}
+                onClick={submitFeedback}
+                sx={{ bgcolor: '#C084FC', '&:hover': { bgcolor: '#A855F7' }, textTransform: 'none', fontSize: '0.8rem', fontWeight: 700, '&.Mui-disabled': { bgcolor: 'rgba(255,255,255,0.05)', color: '#334155' } }}
+              >
+                Submit
+              </Button>
+            </Box>
+          </Box>
+        </Box>
+      )}
     </Box>
   );
 }

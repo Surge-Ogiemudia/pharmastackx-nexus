@@ -34,6 +34,25 @@ function extractMedicineJSON(text: string): object {
   return JSON.parse(stripped.substring(startIdx, endIdx + 1));
 }
 
+function computeConfidence(med: Record<string, unknown>): { confidence: 'High' | 'Medium' | 'Low'; flags: string[] } {
+  let score = 0;
+  const flags: string[] = [];
+
+  const name = String(med.name ?? '');
+  const strength = String(med.strength ?? '');
+  const form = String(med.form ?? '');
+  const quantity = Number(med.quantity ?? 0);
+
+  if (name.length >= 3) score += 2; else flags.push('medicine name too short');
+  if (/^[A-Za-z\s\-().]+$/.test(name)) score += 1; else flags.push('unusual characters in name');
+  if (/\d+\s*(mg|ml|g|mcg|iu|%)/i.test(strength)) score += 2; else if (strength.length > 0) score += 1; else flags.push('strength missing or unclear');
+  if (['Tablet', 'Capsule', 'Syrup', 'Injection', 'Cream', 'Inhaler', 'Drops'].includes(form)) score += 1; else flags.push('form not recognized');
+  if (quantity > 0 && quantity <= 500) score += 1; else flags.push('quantity missing or unusual');
+
+  const confidence: 'High' | 'Medium' | 'Low' = score >= 6 ? 'High' : score >= 3 ? 'Medium' : 'Low';
+  return { confidence, flags };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { image } = await req.json();
@@ -44,7 +63,11 @@ export async function POST(req: NextRequest) {
     const result = await model.generateContent([PROMPT, { inlineData: { data: base64Data, mimeType: 'image/jpeg' } }]);
     const text = result.response.text();
     const medicine = extractMedicineJSON(text);
-    return NextResponse.json({ medicines: [medicine] });
+    const { confidence, flags } = computeConfidence(medicine as Record<string, unknown>);
+    return NextResponse.json({
+      medicines: [medicine],
+      safetyReport: { confidence, verifyWithPharmacist: confidence !== 'High', flags },
+    });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     return NextResponse.json({ error: msg }, { status: 500 });

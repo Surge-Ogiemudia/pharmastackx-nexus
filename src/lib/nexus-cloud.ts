@@ -52,7 +52,7 @@ async function tryGemma4(generateFn: () => Promise<string>, maxAttempts = 2): Pr
       return await withTimeout(generateFn(), GEMMA_TIMEOUT_MS);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      nexusLogger.emit('ERROR', `☁️ Cloud error (attempt ${attempt}): ${msg.substring(0, 120)}`);
+      nexusLogger.emit('ERROR', `☁️ Cloud error (attempt ${attempt}): ${msg.substring(0, 400)}`);
       const isRetryable = /\[5\d\d]/.test(msg);
       if (!isRetryable || attempt === maxAttempts) return null;
       nexusLogger.emit('SYSTEM', `⚠️ Gemma 4 server error — retrying (${attempt}/${maxAttempts})...`);

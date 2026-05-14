@@ -18,11 +18,12 @@ import FlipCameraAndroidIcon from '@mui/icons-material/FlipCameraAndroid';
 import ImageIcon from '@mui/icons-material/Image';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import SearchIcon from '@mui/icons-material/Search';
-import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import ErrorOutlinedIcon from '@mui/icons-material/ErrorOutlined';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNexusBrain } from '@/components/NexusBrainProvider';
 import type { Medicine } from '@/lib/nexus-brain';
+import type { ScanSafetyReport } from '@/lib/nexus-safety';
 
 type ScanMode = 'medicine' | 'prescription';
 
@@ -31,6 +32,7 @@ export default function ScannerPage() {
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [results, setResults] = useState<Medicine[]>([]);
+  const [safetyReport, setSafetyReport] = useState<ScanSafetyReport | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [showCamera, setShowCamera] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -128,20 +130,22 @@ export default function ScannerPage() {
   const processScan = async (imageData: string) => {
     setScanning(true);
     setResults([]);
+    setSafetyReport(null);
     setScanError(null);
 
     try {
       const intent = scanMode === 'medicine' ? 'SCAN_MEDICINE' : 'SCAN_PRESCRIPTION';
       logger.emit('SYSTEM', `📸 Starting ${scanMode} scan...`);
 
-      const medicines = await brain.extractMedicines(
+      const scanResult = await brain.extractMedicines(
         { type: 'image', image: imageData, mimeType: 'image/jpeg' },
         intent as any
       );
 
-      if (medicines.length > 0) {
-        setResults(medicines);
-        logger.emit('CONNECT', `✅ Scan complete — ${medicines.length} medicine(s) extracted and ready to search`);
+      if (scanResult.medicines.length > 0) {
+        setResults(scanResult.medicines);
+        if (scanResult.safetyReport) setSafetyReport(scanResult.safetyReport);
+        logger.emit('CONNECT', `✅ Scan complete — ${scanResult.medicines.length} medicine(s) extracted and ready to search`);
       } else {
         setScanError('No medicines could be extracted. Try a clearer or closer image.');
         logger.emit('ERROR', '⚠️ No medicines could be extracted.');
@@ -165,6 +169,7 @@ export default function ScannerPage() {
   const resetScan = () => {
     setCapturedImage(null);
     setResults([]);
+    setSafetyReport(null);
     setScanning(false);
     setScanError(null);
   };
@@ -398,7 +403,7 @@ export default function ScannerPage() {
                   <Card sx={{ bgcolor: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)' }}>
                     <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <ErrorOutlineIcon sx={{ color: '#EF4444', fontSize: 20 }} />
+                        <ErrorOutlinedIcon sx={{ color: '#EF4444', fontSize: 20 }} />
                         <Typography sx={{ fontWeight: 700, color: '#EF4444', fontSize: '0.85rem' }}>
                           Scan Failed
                         </Typography>
@@ -494,6 +499,49 @@ export default function ScannerPage() {
                       ))}
                     </AnimatePresence>
                   </Box>
+
+                  {/* Safety report */}
+                  {safetyReport && (
+                    <Box
+                      sx={{
+                        mt: 1.5, p: 1.25, borderRadius: '10px',
+                        bgcolor: safetyReport.confidence === 'High'
+                          ? 'rgba(74,222,128,0.05)'
+                          : safetyReport.confidence === 'Medium'
+                          ? 'rgba(251,191,36,0.05)'
+                          : 'rgba(239,68,68,0.05)',
+                        border: `1px solid ${
+                          safetyReport.confidence === 'High'
+                            ? 'rgba(74,222,128,0.2)'
+                            : safetyReport.confidence === 'Medium'
+                            ? 'rgba(251,191,36,0.2)'
+                            : 'rgba(239,68,68,0.2)'
+                        }`,
+                      }}
+                    >
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: safetyReport.verifyWithPharmacist ? 0.75 : 0 }}>
+                        <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.06em', color: '#64748B', textTransform: 'uppercase' }}>
+                          Scan Confidence
+                        </Typography>
+                        <Chip
+                          label={safetyReport.confidence}
+                          size="small"
+                          sx={{
+                            bgcolor: safetyReport.confidence === 'High' ? 'rgba(74,222,128,0.15)' : safetyReport.confidence === 'Medium' ? 'rgba(251,191,36,0.15)' : 'rgba(239,68,68,0.15)',
+                            color: safetyReport.confidence === 'High' ? '#4ADE80' : safetyReport.confidence === 'Medium' ? '#FBBF24' : '#EF4444',
+                            fontSize: '0.6rem', fontWeight: 700, height: 18, border: 'none',
+                            '& .MuiChip-label': { px: 0.75 },
+                          }}
+                        />
+                      </Box>
+                      {safetyReport.verifyWithPharmacist && (
+                        <Typography sx={{ fontSize: '0.7rem', color: '#94A3B8', lineHeight: 1.5 }}>
+                          Verify with a licensed pharmacist before purchasing
+                          {safetyReport.flags.length > 0 && ` — ${safetyReport.flags.join(', ')}`}.
+                        </Typography>
+                      )}
+                    </Box>
+                  )}
 
                   <Button
                     variant="contained"
