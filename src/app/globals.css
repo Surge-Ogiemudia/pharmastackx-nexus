@@ -13,6 +13,14 @@ body {
   background-color: #0A0F1C;
   color: #E0F2F1;
   font-family: 'Poppins', sans-serif;
+  /* Prevent iOS from auto-enlarging text on orientation change */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Smooth momentum scrolling on iOS for all scrollable areas */
+* {
+  -webkit-overflow-scrolling: touch;
 }
 
 ::-webkit-scrollbar {
