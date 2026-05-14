@@ -35,7 +35,7 @@ export function NexusBrainProvider({ children }: { children: React.ReactNode }) 
   const [edgeProgress, setEdgeProgress] = useState(0);
   const [edgeDownloadedMB, setEdgeDownloadedMB] = useState(0);
   const [edgeTotalMB, setEdgeTotalMB] = useState(0);
-  const [demoMode, setDemoModeState] = useState(true); // Default ON for hackathon
+  const [demoMode, setDemoModeState] = useState(false);
   const [forceEdge, setForceEdgeState] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
 
