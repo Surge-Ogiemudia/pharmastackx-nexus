@@ -137,7 +137,24 @@ function detectExcessiveLength(text: string): boolean {
 }
 
 function detectOffTopic(text: string): boolean {
-  return !/\b(mg|ml|dose|dosage|drug|medicine|medication|tablet|capsule|syrup|injection|pharmacist|pharmacy|prescribed|prescription|side effect|treatment|antibiotic|paracetamol|ibuprofen|patient|daily|twice|thrice|oral|brand|generic|health|symptom|disease|infection|pain|fever|blood|pressure|diabetes|malaria|typhoid|vitamin|supplement|nafdac)\b/i.test(text);
+  return !/\b(mg|ml|dose|dosage|drug|medicine|medication|tablet|capsule|syrup|injection|pharmacist|pharmacy|prescribed|prescription|side effects?|effects?|adverse|reaction|treatment|antibiotic|paracetamol|ibuprofen|patient|daily|twice|thrice|oral|brand|generic|health|symptom|disease|infection|pain|fever|blood|pressure|diabetes|malaria|typhoid|vitamin|supplement|nafdac|edema|swelling|headache|dizziness|nausea|palpitation|flushing|fatigue|rash|insomnia|constipation|appetite|weight|cardiac|renal|hepatic|vascular|peripheral|muscle|kidney|liver|heart|clinical|therapeutic|contraindication|interaction|toxicity|common|rare|severe|mild|reduce|lower|block|relax|dilate|inhibit|monitor|calcium|channel|blocker|statin|diuretic|beta|alpha|ACE|BP|HR|mmHg)\b/i.test(text);
+}
+
+export function deduplicateResponse(text: string): string {
+  const sentences = text.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter((s) => s.length > 0);
+  const seenKeys = new Set<string>();
+  const seenPrefixes = new Set<string>();
+  const unique: string[] = [];
+  for (const s of sentences) {
+    const key = s.toLowerCase().replace(/\s+/g, ' ').trim();
+    const prefix = key.substring(0, 50);
+    if (!seenKeys.has(key) && !seenPrefixes.has(prefix)) {
+      seenKeys.add(key);
+      seenPrefixes.add(prefix);
+      unique.push(s);
+    }
+  }
+  return unique.join(' ');
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────

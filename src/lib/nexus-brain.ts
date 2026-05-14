@@ -10,6 +10,7 @@ import {
   validateResponse,
   buildRetrySystemPrompt,
   buildGuardedSystemPrompt,
+  deduplicateResponse,
   trackResponse,
   logFailure,
   logCorrectionResult,
@@ -358,11 +359,25 @@ Category:`;
     const duration = Math.round(performance.now() - start);
     nexusLogger.emit('INFERENCE', `⚡ Response generated in ${duration}ms`, undefined, duration);
 
-    const clean = stripSystemLeaks(stripThinking(response));
+    const rawClean = stripSystemLeaks(stripThinking(response));
+    // Deduplicate before display — model sometimes outputs the answer twice
+    const clean = deduplicateResponse(rawClean);
     trackResponse();
 
     if (!clean || clean.length < 5) {
       return { text: "That's outside pharmacy — see a physician.", flagged: false, patternsDetected: [], corrected: false };
+    }
+
+    // Track if model had doubled output even though we cleaned it
+    if (rawClean !== clean) {
+      logFailure({
+        feature: 'askrx',
+        patterns: ['double_response'],
+        trigger: message,
+        bad_output_sample: rawClean,
+        auto_detected: true,
+      });
+      logCorrectionResult(true, 'askrx', ['double_response']);
     }
 
     const validation = validateResponse(clean, 'askrx');
@@ -715,6 +730,10 @@ function stripSystemLeaks(text: string): string {
     'NEVER say',
     'consult a doctor',
     'seek professional advice',
+    'Direct and confident',
+    'TONE:',
+    'Final Answer:',
+    'Final Answer',
   ];
   const lines = text.split('\n');
   const clean = lines.filter(
