@@ -244,8 +244,11 @@ export default function NexusPage() {
             return;
           }
         }
-      } catch { /* fall through to consultation */ }
+      } catch { /* fall through */ }
       setExtracting(false);
+      // Looked like a request but no medicine found — ask for clarification
+      addMsg({ role: 'ai', text: "I couldn't identify a specific medicine in that. Could you name the medicine you need? For example: \"I need amoxicillin 500mg\"." });
+      return;
     }
 
     // Consultation

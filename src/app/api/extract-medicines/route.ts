@@ -5,25 +5,27 @@ export const maxDuration = 30;
 
 const EXTRACT_PROMPT = `You are a pharmaceutical extraction AI for PharmaStackX.
 
-Given a patient's search query, extract the medicines they need as structured data.
+Given a patient's search query, extract ONLY the medicines they want to obtain.
+Ignore location info, greetings, and context — focus only on medicine names.
 
 Handle all query types:
 - Direct drug names: "amoxicillin 500mg" → extract directly
-- Brand names: "Lonart", "Coartem" → use that name
+- Brand names: "Tylenol", "Panadol", "Lonart", "Coartem" → use that name
 - Condition-based: "something for malaria" → artemether-lumefantrine (first-line)
-- Symptoms: "I have a fever and headache" → paracetamol
+- Symptoms: "I have a fever" → paracetamol
+- Mixed with location: "I need Tylenol, I'm in Lagos" → extract only Tylenol
 - Vague: "blood pressure medicine" → amlodipine (common first-line)
-
-Use your pharmaceutical knowledge. Always return at least one medicine.
 
 Return ONLY a valid JSON array. No markdown. No explanation.
 [{"name": "string", "strength": "string or null", "form": "string or null", "quantity": number or null}]
 
 Examples:
+"I need Tylenol, I'm located in Edo state" → [{"name":"Tylenol","strength":null,"form":null,"quantity":null}]
 "I need something for malaria" → [{"name":"Artemether-Lumefantrine","strength":"80/480mg","form":"Tablet","quantity":null}]
 "amoxicillin 500mg x10" → [{"name":"Amoxicillin","strength":"500mg","form":"Capsule","quantity":10}]
-"Lonart DS" → [{"name":"Lonart DS","strength":"80/480mg","form":"Tablet","quantity":null}]
-"something for high BP" → [{"name":"Amlodipine","strength":"5mg","form":"Tablet","quantity":null}]`;
+"Lonart DS please" → [{"name":"Lonart DS","strength":"80/480mg","form":"Tablet","quantity":null}]
+"something for high BP" → [{"name":"Amlodipine","strength":"5mg","form":"Tablet","quantity":null}]
+"looking for augmentin" → [{"name":"Augmentin","strength":null,"form":null,"quantity":null}]`;
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
