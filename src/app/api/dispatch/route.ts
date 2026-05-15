@@ -12,8 +12,9 @@ export async function POST(req: NextRequest) {
     }
     const id = await createRequest({ medicines, userState, userPhone });
     return NextResponse.json({ requestId: id });
-  } catch {
-    return NextResponse.json({ error: 'Failed to create request' }, { status: 500 });
+  } catch (err) {
+    console.error('[dispatch POST]', err);
+    return NextResponse.json({ error: String(err) }, { status: 500 });
   }
 }
 
@@ -21,7 +22,8 @@ export async function GET() {
   try {
     const requests = await getAllActive();
     return NextResponse.json({ requests });
-  } catch {
-    return NextResponse.json({ error: 'Failed to fetch requests' }, { status: 500 });
+  } catch (err) {
+    console.error('[dispatch GET]', err);
+    return NextResponse.json({ error: String(err) }, { status: 500 });
   }
 }
