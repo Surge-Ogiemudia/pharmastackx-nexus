@@ -76,6 +76,7 @@ function SearchContent() {
   const [geoObtained, setGeoObtained] = useState(false);
   const [phoneError, setPhoneError] = useState('');
   const [pendingMedicines, setPendingMedicines] = useState<Medicine[]>([]);
+  const [extracting, setExtracting] = useState(false);
 
   const seenIds = useRef<Set<string>>(new Set());
   const waitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -203,9 +204,26 @@ function SearchContent() {
 
   // ── Triggers ──
 
-  const startSearch = () => {
+  const startSearch = async () => {
     if (!medicineName.trim()) return;
-    openModal([{ name: medicineName, strength: strength || '', form: 'Tablet', quantity: 1 }]);
+    setExtracting(true);
+    try {
+      const res = await fetch('/api/extract-medicines', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: medicineName }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        openModal(data.medicines);
+      } else {
+        openModal([{ name: medicineName, strength: strength || '', form: 'Tablet', quantity: 1 }]);
+      }
+    } catch {
+      openModal([{ name: medicineName, strength: strength || '', form: 'Tablet', quantity: 1 }]);
+    } finally {
+      setExtracting(false);
+    }
   };
 
   useEffect(() => {
@@ -330,7 +348,7 @@ function SearchContent() {
                   fullWidth
                   startIcon={<SearchIcon />}
                   onClick={startSearch}
-                  disabled={!medicineName.trim()}
+                  disabled={!medicineName.trim() || extracting}
                   sx={{
                     bgcolor: '#1B5E20',
                     '&:hover': { bgcolor: '#2E7D32' },
@@ -338,7 +356,7 @@ function SearchContent() {
                     fontWeight: 700,
                   }}
                 >
-                  Find Medicines
+                  {extracting ? 'Identifying medicines…' : 'Find Medicines'}
                 </Button>
               </CardContent>
             </Card>
