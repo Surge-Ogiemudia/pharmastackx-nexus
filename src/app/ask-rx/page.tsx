@@ -16,7 +16,7 @@ import MedicationIcon from '@mui/icons-material/Medication';
 import ThumbDownOutlinedIcon from '@mui/icons-material/ThumbDownOutlined';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNexusBrain } from '@/components/NexusBrainProvider';
-import { reportFeedback, logRoutingFailure, type FailurePattern } from '@/lib/nexus-safety';
+import { reportFeedback, type FailurePattern } from '@/lib/nexus-safety';
 import { useRouter } from 'next/navigation';
 import type { ConsultResult, Medicine } from '@/lib/nexus-brain';
 import type { PharmacistResponse } from '@/lib/dispatch-store';
@@ -24,10 +24,8 @@ import type { PharmacistResponse } from '@/lib/dispatch-store';
 type MessageRole = 'user' | 'ai' | 'system' | 'dispatch' | 'suggestion' | 'detail_form';
 
 interface SuggestedAction {
-  type: 'find_medicine' | 'condition_search';
-  medicines?: Medicine[];
-  condition?: string | null;
-  suggestedMedicines?: Medicine[];
+  type: 'find_medicine';
+  medicines: Medicine[];
   originalQuery?: string;
 }
 
@@ -59,13 +57,10 @@ const SUGGESTED = [
 ];
 
 
-// Pure health questions don't need classify-intent — saves an API round-trip.
-// "Where can I find/get/buy X" is NOT a consultation — exclude those so classify-intent runs.
-function isObviousConsultation(text: string): boolean {
-  const t = text.trim();
-  if (/^where\b/i.test(t) && /\b(find|get|buy|purchase|locate|pharmacist|stock|available|near)\b/i.test(t)) return false;
-  return /^(what\s|how\s|why\s|is\s|are\s|can\s|should\s|tell\s|explain\s|does\s|when\s|where\s|will\s)/i.test(t)
-    || /\b(side effect|adverse|interact|overdose|safe during|how long|difference between|versus|\bvs\b|mechanism|contraindicated)\b/i.test(t);
+// Camera/scan intent detection — avoids sending a photo request to the pharma consultation model
+function isScanRequest(text: string): boolean {
+  return /\b(scan|photo|picture|snap|camera|photograph)\b/i.test(text)
+    && /\b(prescription|rx|pill|medicine|tablet|box|pack|label|capsule)\b/i.test(text);
 }
 
 export default function NexusPage() {
@@ -200,16 +195,10 @@ export default function NexusPage() {
   };
 
   const handleSuggestedAction = (action: SuggestedAction) => {
-    if (action.type === 'find_medicine' && action.medicines?.length) {
+    if (action.medicines.length === 1) {
       addMsg({ role: 'detail_form', text: '', pendingMedicines: action.medicines });
-    } else if (action.type === 'condition_search') {
-      addMsg({
-        role: 'suggestion',
-        text: '',
-        suggestedMedicines: action.suggestedMedicines ?? [],
-        condition: action.condition ?? undefined,
-        originalQuery: action.originalQuery,
-      });
+    } else {
+      addMsg({ role: 'suggestion', text: '', suggestedMedicines: action.medicines, originalQuery: action.originalQuery });
     }
   };
 
@@ -271,56 +260,40 @@ export default function NexusPage() {
       return;
     }
 
-    // Text path: classify intent (sequential to avoid rate limits), then consult
+    // Text path: consult Gemma, then extract any medicines mentioned in the response
     setLoading(true);
     try {
-      const consultHistory = messages.filter((m) => m.role === 'user' || m.role === 'ai').slice(-6)
-        .map((m) => ({ role: m.role === 'user' ? 'user' : 'model', text: m.text }));
-
-      // Skip classify-intent for obvious health questions — saves an API call and avoids rate limits.
-      // Only classify when the message is ambiguous (could be find or condition or scan).
-      const needsClassify = !isObviousConsultation(messageText);
-
-      let classifyData: { intent: string; medicines?: Medicine[]; condition?: string | null; suggestedMedicines?: Medicine[] } | null = null;
-      if (needsClassify) {
-        try {
-          const ctx = messages.filter((m) => m.role === 'user' || m.role === 'ai').slice(-4)
-            .map((m) => ({ role: m.role, text: m.text }));
-          const r = await fetch('/api/classify-intent', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: messageText, history: ctx }),
-          });
-          if (r.ok) classifyData = await r.json();
-        } catch { /* fall through to pure consultation */ }
-      }
-
-      const intent: string = classifyData?.intent ?? 'consultation';
-
-      // Scan: no consultation needed
-      if (intent === 'scan') {
+      // Scan: skip the consultation model entirely
+      if (isScanRequest(messageText)) {
         addMsg({ role: 'ai', text: 'Tap the camera icon below to scan your prescription or medicine.' });
         return;
       }
 
-      // Always consult Gemma for the conversational answer (sequential after classify)
+      const consultHistory = messages.filter((m) => m.role === 'user' || m.role === 'ai').slice(-6)
+        .map((m) => ({ role: m.role === 'user' ? 'user' : 'model', text: m.text }));
+
       const consultResult = await brain.consult(messageText, consultHistory);
 
-      // Attach a confirmation action button — user must tap before anything is dispatched
+      // Extract medicine names from the response text — if Gemma mentioned any drug,
+      // offer to find it. No intent classification needed.
       let suggestedAction: SuggestedAction | undefined;
-      if (intent === 'find_medicine' && classifyData?.medicines?.length) {
-        suggestedAction = { type: 'find_medicine', medicines: classifyData.medicines };
-      } else if (intent === 'condition_search') {
-        if (!classifyData?.suggestedMedicines?.length) {
-          logRoutingFailure(messageText, 'condition_suggestion', 'empty_suggestions');
+      try {
+        const extractRes = await fetch('/api/extract-medicines', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: consultResult.text }),
+        });
+        if (extractRes.ok) {
+          const { medicines }: { medicines: Medicine[] } = await extractRes.json();
+          if (medicines?.length > 0) {
+            suggestedAction = {
+              type: 'find_medicine',
+              medicines: medicines.slice(0, 4),
+              originalQuery: messageText,
+            };
+          }
         }
-        suggestedAction = {
-          type: 'condition_search',
-          condition: classifyData?.condition ?? null,
-          suggestedMedicines: classifyData?.suggestedMedicines ?? [],
-          originalQuery: messageText,
-        };
-      }
+      } catch { /* no button if extraction fails — that's fine */ }
 
       addMsg({
         role: 'ai',
@@ -974,9 +947,11 @@ function MessageBubble({ msg, onSuggestedAction, onRetry }: { msg: Message; onSu
               <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: actionTaken ? '#475569' : '#00E5A0' }}>
                 {actionTaken
                   ? 'On it…'
-                  : msg.suggestedAction.type === 'find_medicine'
-                    ? `Find ${msg.suggestedAction.medicines![0].name}${msg.suggestedAction.medicines!.length > 1 ? ` +${msg.suggestedAction.medicines!.length - 1} more` : ''} near me`
-                    : `Show me medicines for ${msg.suggestedAction.condition ?? 'this condition'}`}
+                  : msg.suggestedAction.medicines.length === 1
+                    ? `Find ${msg.suggestedAction.medicines[0].name} near me`
+                    : msg.suggestedAction.medicines.length === 2
+                      ? `Find ${msg.suggestedAction.medicines[0].name} & ${msg.suggestedAction.medicines[1].name}`
+                      : `Find these ${msg.suggestedAction.medicines.length} medicines`}
               </Typography>
               {!actionTaken && <Typography sx={{ fontSize: '0.8rem', color: '#00E5A0' }}>→</Typography>}
             </Box>
