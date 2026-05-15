@@ -510,9 +510,9 @@ export default function AskRXPage() {
         <Box sx={{ display: 'flex', gap: 0.75, mb: 1, flexWrap: 'wrap' }}>
           {[
             { code: 'en-US', label: 'EN' },
-            { code: 'yo', label: 'Yoruba' },
-            { code: 'ig', label: 'Igbo' },
-            { code: 'ha', label: 'Hausa' },
+            { code: 'fr-FR', label: 'FR' },
+            { code: 'es-ES', label: 'ES' },
+            { code: 'ar', label: 'AR' },
           ].map((lang) => (
             <Chip
               key={lang.code}

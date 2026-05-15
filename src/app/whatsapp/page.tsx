@@ -58,7 +58,7 @@ export default function WhatsAppPage() {
     setProcessing(true);
 
     try {
-      logger.emit('SYSTEM', `📩 Received WhatsApp message from group: Young Pharmacists Group, Edo State Chapter`);
+      logger.emit('SYSTEM', `📩 Received WhatsApp message from group: Pharmacist Network Group`);
       logger.emit('INTENT', `🎯 Classifying message type...`);
 
       const scanResult = await brain.extractMedicines(
@@ -154,10 +154,10 @@ export default function WhatsAppPage() {
           </Box>
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <Typography sx={{ fontWeight: 700, color: '#E0F2F1', fontSize: '0.9rem' }}>
-              Young Pharmacists Group, Edo State Chapter
+              Pharmacist Network Group
             </Typography>
             <Typography sx={{ color: '#8696A0', fontSize: '0.7rem' }}>
-              ~108 members · Pharmacists Group
+              ~340 members · Global Pharmacists Group
             </Typography>
           </Box>
           {/* Live dot */}
@@ -187,17 +187,17 @@ export default function WhatsAppPage() {
         >
           {/* Standing messages */}
           <WAMessage
-            sender="Pharm. Chike"
-            text="Drug search: Amoxicillin 500mg capsule needed. Qty 20. Lagos."
+            sender="Pharm. Patel"
+            text="Drug search: Amoxicillin 500mg capsule needed. Qty 20. Location Manchester."
             time="10:23 AM"
           />
           <WAMessage
-            sender="Pharm. Ngozi"
-            text="Who has Metformin 500mg? Patient needs urgently. Location Asaba."
+            sender="Pharm. Chen"
+            text="Who has Metformin 500mg? Patient needs urgently. Location: City Centre."
             time="10:45 AM"
           />
           <WAMessage
-            sender="Pharm. Emeka"
+            sender="Pharm. Garcia"
             text="coartem 6+1 anyone? urgent — patient waiting"
             time="11:02 AM"
           />
@@ -462,13 +462,7 @@ function WAMessage({ sender, text, time }: { sender: string; text: string; time:
 }
 
 function extractLocation(text: string): string {
-  const places = [
-    'Lagos', 'Abuja', 'Port Harcourt', 'Benin', 'Edo', 'Rivers',
-    'Kano', 'Asaba', 'Delta', 'Enugu', 'Imo', 'Ogun', 'Oyo',
-    'Kaduna', 'Ibadan', 'Ikeja', 'Lekki', 'Victoria Island',
-  ];
-  for (const p of places) {
-    if (text.toLowerCase().includes(p.toLowerCase())) return p;
-  }
+  const m = text.match(/location[:\s]+([^,.!?\n]+)/i);
+  if (m?.[1]) return m[1].trim();
   return '';
 }

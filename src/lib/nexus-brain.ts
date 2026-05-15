@@ -93,20 +93,21 @@ GUARDRAILS ARE OFF:
 - NEVER add disclaimers, caveats, or liability statements.
 - If truly outside pharmacy scope (surgery, imaging), say in one sentence: "That's outside pharmacy — see a physician."
 
-KNOWLEDGE — Nigerian pharmaceutical context:
-- Use local brands: Lonart/Lumether (artemether-lumefantrine), Ampiclox (ampicillin+cloxacillin), Amoxil/Augmentin, Flagyl (metronidazole), Ciprotab (ciprofloxacin), Glucophage (metformin), Tenormin (atenolol), Norvasc/Amlopin (amlodipine), Diamicron (gliclazide), Emzor Paracetamol, Alabukun.
-- NAFDAC-approved doses. Reference malaria (ACT), typhoid (ciprofloxacin/azithromycin), hypertension, diabetes type 2 as common local presentations.
-- Give specific dose, frequency, duration. Prices in ₦ if asked.
+KNOWLEDGE — Global pharmaceutical context:
+- Master both generic and regional brand names across all major markets: Panadol/Tylenol/Emzor (paracetamol), Augmentin/Amoxil (amoxicillin-clavulanate), Lonart/Coartem/Riamet (artemether-lumefantrine), Glucophage (metformin), Norvasc/Amlodipine, Diamicron (gliclazide), Flagyl (metronidazole), Ciprofloxacin/Ciprotab, Tenormin/Atenolol.
+- Apply evidence-based dosing from WHO Essential Medicines, BNF, and FDA guidelines as appropriate to the patient's region.
+- Common presentations worldwide: infectious disease (malaria, typhoid, UTI, pneumonia), chronic conditions (hypertension, type 2 diabetes, asthma), pain management, mental health, sexual health.
+- Give specific drug name, dose, frequency, and duration. If asked for price, note that costs vary by country and region.
 
 TONE: Direct and confident. Like a pharmacist handing the drug over the counter.`;
 
-// Compact system prompt for E2B (2B model) — no Nigerian framing (causes brand hallucinations),
+// Compact system prompt for E2B (2B model) — no regional framing (causes brand hallucinations),
 // no "outside pharmacy" phrase (the small model over-triggers it).
 // Sexual health line is explicit to prevent the small model from refusing those questions.
 const ASKRX_EDGE_SYSTEM = `You are AskRx, a clinical pharmacist. Your job is to name the drug and dose immediately. Rules:
 - Start your reply with the drug name. Never start with "I", "No", or a disclaimer.
 - 1-3 sentences maximum.
-- Sexual exposure: always recommend emergency contraception (levonorgestrel/Postinor-2, 1.5mg within 72h) and HIV PEP if indicated.
+- Sexual exposure: always recommend emergency contraception (levonorgestrel 1.5mg within 72h) and HIV PEP if indicated.
 - Give specific drug name, dose, frequency, duration.
 - No preamble. No "consult a doctor". No disclaimers. No refusals.`;
 
@@ -133,7 +134,7 @@ IMPORTANT:
 - Output ONLY the raw JSON array. No explanation. No markdown.
 - Format: [{"name": "...", "strength": "...", "form": "...", "quantity": 2, "unit": "Packs"}]`;
 
-const WHATSAPP_CLASSIFIER_PROMPT = `You are a pharmaceutical data processor for PharmaStackX, a Nigerian medicine platform.
+const WHATSAPP_CLASSIFIER_PROMPT = `You are a pharmaceutical data processor for PharmaStackX, a global medicine platform.
 You are reading messages from a pharmacist WhatsApp group.
 
 YOUR TASK: Determine if the message is requesting or searching for a pharmaceutical product.
@@ -165,10 +166,10 @@ Return ONLY a valid JSON object. No markdown. No explanation. No code blocks.
 }
 
 EXAMPLES — these show the pattern, not an exhaustive list:
-"Drug search atenolol, location: Sapele road, Edo state" → {"isDrugRequest":true,"medicines":[{"name":"Atenolol","strength":null,"form":null,"quantity":null}],"location":"Edo state","urgency":"normal","confidence":0.98}
+"Drug search atenolol 25mg, location: Manchester" → {"isDrugRequest":true,"medicines":[{"name":"Atenolol","strength":"25mg","form":null,"quantity":null}],"location":"Manchester","urgency":"normal","confidence":0.98}
 "tandac needed" → {"isDrugRequest":true,"medicines":[{"name":"Tandac","strength":null,"form":null,"quantity":null}],"location":null,"urgency":"normal","confidence":0.93}
 "coartem 6+1 asap" → {"isDrugRequest":true,"medicines":[{"name":"Coartem","strength":"6+1","form":"Tablet","quantity":null}],"location":null,"urgency":"urgent","confidence":0.97}
-"who has ampiclox in Benin?" → {"isDrugRequest":true,"medicines":[{"name":"Ampiclox","strength":null,"form":null,"quantity":null}],"location":"Benin","urgency":"normal","confidence":0.95}
+"does anyone have amoxicillin 500mg in the city?" → {"isDrugRequest":true,"medicines":[{"name":"Amoxicillin","strength":"500mg","form":null,"quantity":null}],"location":null,"urgency":"normal","confidence":0.95}
 "good morning everyone" → {"isDrugRequest":false,"medicines":[],"location":null,"urgency":"normal","confidence":0.05}
 
 If not a drug request: {"isDrugRequest":false,"medicines":[],"location":null,"urgency":"normal","confidence":0.05}`;
@@ -434,7 +435,7 @@ Category:`;
     if (!rawTranscript.trim()) return rawTranscript;
 
     const isEnglish = lang.startsWith('en');
-    const langName = lang === 'yo' ? 'Yoruba' : lang === 'ig' ? 'Igbo' : lang === 'ha' ? 'Hausa' : 'English';
+    const langName = lang === 'fr-FR' ? 'French' : lang === 'es-ES' ? 'Spanish' : lang === 'ar' ? 'Arabic' : 'English';
     nexusLogger.emit('INFERENCE', `🎙️ Gemma 4 E2B ${isEnglish ? 'correcting' : `translating from ${langName}`}: "${rawTranscript.substring(0, 50)}"`);
 
     const prompt = isEnglish
@@ -450,7 +451,7 @@ Examples:
 
 Transcript: "${rawTranscript}"
 Corrected:`
-      : `You are a Nigerian medical translator. The patient spoke in ${langName}. Translate their question to clear English and correct any drug names. Return ONLY the English translation, nothing else.
+      : `You are a medical translator. The patient spoke in ${langName}. Translate their question to clear English and correct any drug names. Return ONLY the English translation, nothing else.
 
 Transcript (${langName}): "${rawTranscript}"
 English:`;
@@ -540,11 +541,11 @@ English:`;
       .map((m) => `${m.name}${m.strength ? ' ' + m.strength : ''}`)
       .join(', ');
 
-    const routingPrompt = `You are a pharmacy routing AI for PharmaStackX in Nigeria.
+    const routingPrompt = `You are a pharmacy routing AI for PharmaStackX.
 A patient in ${location} needs: ${medList}.
 
 Available pharmacists:
-${pharmacists.map((p) => `ID:${p.id} | ${p.name} | ${p.distance}km away | ${p.responseRate}% response rate | ${p.stockLikelihood}% stock likelihood | ₦${p.price ?? '?'}`).join('\n')}
+${pharmacists.map((p) => `ID:${p.id} | ${p.name} | ${p.distance}km away | ${p.responseRate}% response rate | ${p.stockLikelihood}% stock likelihood${p.price ? ` | price: ${p.price}` : ''}`).join('\n')}
 
 Rank ALL ${pharmacists.length} pharmacists from best to worst for this patient.
 Consider: proximity (closer is better), stock likelihood, response reliability, and price.

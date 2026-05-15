@@ -12,9 +12,6 @@ import {
   Avatar,
   Dialog,
   DialogContent,
-  MenuItem,
-  Select,
-  FormControl,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
@@ -25,20 +22,13 @@ import PhoneIcon from '@mui/icons-material/Phone';
 import MyLocationIcon from '@mui/icons-material/MyLocation';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
+import EditLocationAltIcon from '@mui/icons-material/EditLocationAlt';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useNexusBrain } from '@/components/NexusBrainProvider';
 import type { PharmacistMatch, Medicine } from '@/lib/nexus-brain';
 import type { PharmacistResponse } from '@/lib/dispatch-store';
 
-const NIGERIAN_STATES = [
-  'Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa',
-  'Benue', 'Borno', 'Cross River', 'Delta', 'Ebonyi', 'Edo',
-  'Ekiti', 'Enugu', 'FCT (Abuja)', 'Gombe', 'Imo', 'Jigawa',
-  'Kaduna', 'Kano', 'Katsina', 'Kebbi', 'Kogi', 'Kwara',
-  'Lagos', 'Nasarawa', 'Niger', 'Ogun', 'Ondo', 'Osun',
-  'Oyo', 'Plateau', 'Rivers', 'Sokoto', 'Taraba', 'Yobe', 'Zamfara',
-];
 
 type SearchPhase = 'idle' | 'scanning' | 'routing' | 'responses';
 
@@ -111,7 +101,7 @@ function SearchContent() {
           hadNew = true;
           logger.emit(
             'CONNECT',
-            `📱 ${r.pharmacistName}: ${r.available ? `AVAILABLE — ₦${r.price.toLocaleString()}` : 'NOT AVAILABLE'}`
+            `📱 ${r.pharmacistName}: ${r.available ? `AVAILABLE — price: ${r.price}` : 'NOT AVAILABLE'}`
           );
         }
       }
@@ -159,9 +149,9 @@ function SearchContent() {
   };
 
   const validatePhone = (v: string) => {
-    const clean = v.replace(/\s/g, '');
-    if (!/^(\+234|0)[789]\d{9}$/.test(clean)) {
-      setPhoneError('Enter a valid Nigerian mobile number');
+    const clean = v.replace(/[\s\-().]/g, '');
+    if (!/^\+?[\d]{7,15}$/.test(clean)) {
+      setPhoneError('Enter a valid phone number');
       return false;
     }
     setPhoneError('');
@@ -546,9 +536,9 @@ function SearchContent() {
                               {r.available && r.price > 0 && (
                                 <>
                                   <Typography sx={{ fontWeight: 700, color: '#00E5A0', fontSize: '1.05rem' }}>
-                                    ₦{r.price.toLocaleString()}
+                                    {r.price.toLocaleString()}
                                   </Typography>
-                                  <Typography sx={{ color: '#64748B', fontSize: '0.65rem', mb: 0.75 }}>quoted price</Typography>
+                                  <Typography sx={{ color: '#64748B', fontSize: '0.65rem', mb: 0.75 }}>est. price</Typography>
                                 </>
                               )}
                               <Button
@@ -723,53 +713,34 @@ function SearchContent() {
 
         <DialogContent sx={{ px: 3, pt: 2.5, pb: 3, display: 'flex', flexDirection: 'column', gap: 0 }}>
 
-          {/* State field */}
+          {/* Location field */}
           <Box sx={{ mb: 2 }}>
             <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, color: '#94A3B8', letterSpacing: '0.08em', textTransform: 'uppercase', mb: 0.75 }}>
-              Your State
+              Your Location
             </Typography>
-            <FormControl fullWidth size="small">
-              <Select
-                displayEmpty
-                value={userState}
-                onChange={(e) => setUserState(e.target.value)}
-                renderValue={(v) => v || <span style={{ color: '#475569' }}>Select a state…</span>}
-                sx={{
-                  bgcolor: 'rgba(15,23,42,0.7)',
-                  color: '#E0F2F1',
-                  borderRadius: '10px',
-                  '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.08)' },
-                  '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(192,132,252,0.35)' },
-                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#C084FC', borderWidth: '1.5px' },
-                  '& .MuiSvgIcon-root': { color: '#64748B' },
-                  '& .MuiSelect-select': { py: 1.25 },
-                }}
-                MenuProps={{
-                  slotProps: {
-                    paper: {
-                      sx: {
-                        bgcolor: '#1A2540',
-                        border: '1px solid rgba(255,255,255,0.08)',
-                        borderRadius: '12px',
-                        maxHeight: 260,
-                        mt: 0.5,
-                        boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
-                        '& .MuiMenuItem-root': {
-                          color: '#CBD5E1', fontSize: '0.875rem', py: 1,
-                          '&:hover': { bgcolor: 'rgba(192,132,252,0.08)', color: '#E0F2F1' },
-                          '&.Mui-selected': { bgcolor: 'rgba(192,132,252,0.15)', color: '#C084FC', fontWeight: 600 },
-                          '&.Mui-selected:hover': { bgcolor: 'rgba(192,132,252,0.2)' },
-                        },
-                      },
-                    },
-                  },
-                }}
-              >
-                {NIGERIAN_STATES.map((s) => (
-                  <MenuItem key={s} value={s}>{s}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+            <TextField
+              fullWidth
+              size="small"
+              placeholder="e.g. Manchester, London, Lagos, Nairobi…"
+              value={userState}
+              onChange={(e) => setUserState(e.target.value)}
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <EditLocationAltIcon sx={{ color: '#64748B', fontSize: 18, mr: 1 }} />
+                  ),
+                },
+              }}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  bgcolor: 'rgba(15,23,42,0.7)', color: '#E0F2F1', borderRadius: '10px',
+                  '& fieldset': { borderColor: 'rgba(255,255,255,0.08)' },
+                  '&:hover fieldset': { borderColor: 'rgba(192,132,252,0.35)' },
+                  '&.Mui-focused fieldset': { borderColor: '#C084FC', borderWidth: '1.5px' },
+                },
+                '& .MuiInputBase-input::placeholder': { color: '#475569' },
+              }}
+            />
           </Box>
 
           {/* Phone field */}
@@ -780,17 +751,16 @@ function SearchContent() {
             <TextField
               fullWidth
               size="small"
-              placeholder="e.g. 08012345678"
+              placeholder="e.g. +44 7700 900123"
               value={userPhone}
               onChange={(e) => { setUserPhone(e.target.value); if (phoneError) validatePhone(e.target.value); }}
               error={!!phoneError}
-              helperText={phoneError || 'Pharmacists will call or WhatsApp this number'}
+              helperText={phoneError || 'Pharmacists will call or message this number'}
               slotProps={{
                 input: {
                   startAdornment: (
-                    <Box sx={{ display: 'flex', alignItems: 'center', mr: 1, gap: 0.5 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', mr: 1 }}>
                       <PhoneIcon sx={{ color: '#64748B', fontSize: 16 }} />
-                      <Typography sx={{ color: '#64748B', fontSize: '0.85rem' }}>+234</Typography>
                     </Box>
                   ),
                 },
