@@ -34,6 +34,8 @@ interface Message {
   medicines?: Medicine[];
   requestId?: string;
   suggestedMedicines?: Medicine[];
+  condition?: string;
+  originalQuery?: string;
 }
 
 const SUGGESTED = [
@@ -184,6 +186,20 @@ export default function NexusPage() {
     setPendingMedicines([]);
   };
 
+  const consultFromCondition = async (query: string) => {
+    setLoading(true);
+    try {
+      const history = messages.filter((m) => m.role === 'user' || m.role === 'ai').slice(-6)
+        .map((m) => ({ role: m.role === 'user' ? 'user' : 'model', text: m.text }));
+      const result: ConsultResult = await brain.consult(query, history);
+      addMsg({ role: 'ai', text: result.text, flagged: result.flagged, patternsDetected: result.patternsDetected });
+    } catch (err) {
+      addMsg({ role: 'ai', text: err instanceof Error ? err.message : 'Could not connect. Please try again.' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // ── Send message ──
   const sendMessage = async (text?: string) => {
     const messageText = text ?? input.trim();
@@ -238,11 +254,11 @@ export default function NexusPage() {
           body: JSON.stringify({ query: messageText }),
         });
         if (extractRes.ok) {
-          const { medicines, needsConfirmation }: { medicines: Medicine[]; needsConfirmation: boolean } = await extractRes.json();
+          const { medicines, needsConfirmation, condition }: { medicines: Medicine[]; needsConfirmation: boolean; condition?: string } = await extractRes.json();
           if (medicines?.length > 0) {
             setExtracting(false);
             if (needsConfirmation) {
-              addMsg({ role: 'suggestion', text: '', suggestedMedicines: medicines });
+              addMsg({ role: 'suggestion', text: '', suggestedMedicines: medicines, condition, originalQuery: messageText });
             } else {
               await triggerDispatch(medicines);
             }
@@ -334,7 +350,12 @@ export default function NexusPage() {
               {msg.role === 'dispatch' && msg.medicines && msg.requestId ? (
                 <DispatchCard medicines={msg.medicines} requestId={msg.requestId} onSelect={(r) => selectPharmacist(r, msg.medicines!)} />
               ) : msg.role === 'suggestion' && msg.suggestedMedicines ? (
-                <SuggestionCard medicines={msg.suggestedMedicines} onSelect={(m) => triggerDispatch([m])} />
+                <SuggestionCard
+                  medicines={msg.suggestedMedicines}
+                  condition={msg.condition}
+                  onDispatch={(meds) => triggerDispatch(meds)}
+                  onConsult={() => consultFromCondition(msg.originalQuery ?? msg.text)}
+                />
               ) : msg.role === 'system' ? (
                 <Box sx={{ textAlign: 'center', py: 0.5 }}>
                   <Typography sx={{ fontSize: '0.75rem', color: '#00E5A0', fontStyle: 'italic' }}>{msg.text}</Typography>
@@ -527,19 +548,39 @@ function DispatchCard({ medicines, requestId, onSelect }: {
   );
 }
 
-// ── Suggestion card (condition → confirm medicine) ──
+// ── Suggestion card (condition → two-step: choice → checklist) ──
 
-function SuggestionCard({ medicines, onSelect }: {
+function SuggestionCard({ medicines, condition, onDispatch, onConsult }: {
   medicines: Medicine[];
-  onSelect: (m: Medicine) => void;
+  condition?: string;
+  onDispatch: (medicines: Medicine[]) => void;
+  onConsult: () => void;
 }) {
-  const [chosen, setChosen] = useState<string | null>(null);
+  const [phase, setPhase] = useState<'choice' | 'list'>('choice');
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [dispatched, setDispatched] = useState(false);
+  const [consulted, setConsulted] = useState(false);
 
-  const handlePick = (m: Medicine) => {
-    if (chosen) return;
-    setChosen(m.name);
-    onSelect(m);
+  const toggle = (i: number) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(i) ? next.delete(i) : next.add(i);
+      return next;
+    });
+
+  const handleDispatch = () => {
+    if (dispatched || selected.size === 0) return;
+    setDispatched(true);
+    onDispatch(medicines.filter((_, i) => selected.has(i)));
   };
+
+  const handleConsult = () => {
+    if (consulted) return;
+    setConsulted(true);
+    onConsult();
+  };
+
+  const label = condition ?? 'this condition';
 
   return (
     <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
@@ -547,41 +588,118 @@ function SuggestionCard({ medicines, onSelect }: {
         <SmartToyIcon sx={{ fontSize: 18, color: '#00E5A0' }} />
       </Avatar>
       <Box sx={{ flex: 1, borderRadius: '4px 16px 16px 16px', bgcolor: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', p: 2 }}>
-        <Typography sx={{ fontSize: '0.85rem', color: '#E0F2F1', mb: 0.5, fontWeight: 500 }}>
-          Did you forget the name? Here are common medicines — does one ring a bell?
-        </Typography>
-        <Typography sx={{ fontSize: '0.75rem', color: '#64748B', mb: 1.5 }}>
-          Tap to order, or type the exact name if you know it.
-        </Typography>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-          {medicines.map((m, i) => (
+
+        {phase === 'choice' ? (
+          <>
+            <Typography sx={{ fontSize: '0.85rem', color: '#E0F2F1', mb: 0.5, fontWeight: 500 }}>
+              You mentioned{' '}
+              <Box component="span" sx={{ color: '#C084FC', fontWeight: 700 }}>{label}</Box>
+              {'. '}How would you like to proceed?
+            </Typography>
+            <Typography sx={{ fontSize: '0.75rem', color: '#64748B', mb: 2 }}>
+              You can look up your medicine or talk to a pharmacist.
+            </Typography>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Box
+                onClick={() => setPhase('list')}
+                sx={{
+                  px: 1.5, py: 1.25, borderRadius: '10px', cursor: 'pointer',
+                  border: '1px solid rgba(0,229,160,0.25)',
+                  '&:hover': { borderColor: '#00E5A0', bgcolor: 'rgba(0,229,160,0.04)' },
+                  transition: 'all 0.15s',
+                }}
+              >
+                <Typography sx={{ fontSize: '0.85rem', fontWeight: 600, color: '#00E5A0' }}>
+                  💊 Help me find the right medicine
+                </Typography>
+                <Typography sx={{ fontSize: '0.72rem', color: '#64748B', mt: 0.25 }}>
+                  See common options — pick and we'll find who has it nearby
+                </Typography>
+              </Box>
+              <Box
+                onClick={handleConsult}
+                sx={{
+                  px: 1.5, py: 1.25, borderRadius: '10px',
+                  cursor: consulted ? 'default' : 'pointer',
+                  border: `1px solid ${consulted ? 'rgba(192,132,252,0.4)' : 'rgba(192,132,252,0.25)'}`,
+                  bgcolor: consulted ? 'rgba(192,132,252,0.06)' : 'transparent',
+                  '&:hover': !consulted ? { borderColor: '#C084FC', bgcolor: 'rgba(192,132,252,0.04)' } : {},
+                  transition: 'all 0.15s',
+                }}
+              >
+                <Typography sx={{ fontSize: '0.85rem', fontWeight: 600, color: '#C084FC' }}>
+                  🩺 Talk to a pharmacist
+                </Typography>
+                <Typography sx={{ fontSize: '0.72rem', color: '#64748B', mt: 0.25 }}>
+                  {consulted ? 'Connecting…' : 'Get expert advice on exactly what to take'}
+                </Typography>
+              </Box>
+            </Box>
+          </>
+        ) : (
+          <>
+            <Typography sx={{ fontSize: '0.85rem', color: '#E0F2F1', mb: 0.25, fontWeight: 500 }}>
+              Common medicines for{' '}
+              <Box component="span" sx={{ color: '#C084FC', fontWeight: 700 }}>{label}</Box>
+            </Typography>
+            <Typography sx={{ fontSize: '0.75rem', color: '#64748B', mb: 1.5 }}>
+              Select all that apply — we'll find pharmacists who have them.
+            </Typography>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75, mb: 1.5 }}>
+              {medicines.map((m, i) => (
+                <Box
+                  key={i}
+                  onClick={() => !dispatched && toggle(i)}
+                  sx={{
+                    display: 'flex', alignItems: 'center', gap: 1.25,
+                    px: 1.5, py: 1, borderRadius: '8px',
+                    cursor: dispatched ? 'default' : 'pointer',
+                    border: `1px solid ${selected.has(i) ? 'rgba(0,229,160,0.4)' : 'rgba(255,255,255,0.07)'}`,
+                    bgcolor: selected.has(i) ? 'rgba(0,229,160,0.06)' : 'transparent',
+                    transition: 'all 0.15s',
+                    '&:hover': !dispatched ? { borderColor: 'rgba(0,229,160,0.3)', bgcolor: 'rgba(0,229,160,0.03)' } : {},
+                  }}
+                >
+                  <Box sx={{
+                    width: 16, height: 16, borderRadius: '4px', flexShrink: 0,
+                    border: `2px solid ${selected.has(i) ? '#00E5A0' : '#475569'}`,
+                    bgcolor: selected.has(i) ? '#00E5A0' : 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'all 0.15s',
+                  }}>
+                    {selected.has(i) && (
+                      <Typography sx={{ fontSize: '0.55rem', color: '#0F172A', fontWeight: 900, lineHeight: 1 }}>✓</Typography>
+                    )}
+                  </Box>
+                  <Box>
+                    <Typography sx={{ fontSize: '0.85rem', fontWeight: selected.has(i) ? 600 : 400, color: selected.has(i) ? '#E0F2F1' : '#94A3B8' }}>
+                      {m.name}{m.strength ? ` ${m.strength}` : ''}
+                    </Typography>
+                    {m.form && <Typography sx={{ fontSize: '0.7rem', color: '#475569' }}>{m.form}</Typography>}
+                  </Box>
+                </Box>
+              ))}
+            </Box>
             <Button
-              key={i}
-              variant="outlined"
-              size="small"
-              onClick={() => handlePick(m)}
-              disabled={!!chosen}
+              variant="contained"
+              fullWidth
+              disabled={selected.size === 0 || dispatched}
+              onClick={handleDispatch}
               sx={{
-                borderColor: chosen === m.name ? '#00E5A0' : 'rgba(0,229,160,0.3)',
-                color: chosen === m.name ? '#00E5A0' : '#94A3B8',
-                bgcolor: chosen === m.name ? 'rgba(0,229,160,0.1)' : 'transparent',
-                textTransform: 'none',
-                borderRadius: '8px',
-                fontSize: '0.8rem',
-                fontWeight: chosen === m.name ? 700 : 400,
-                '&:hover': { bgcolor: 'rgba(0,229,160,0.08)', borderColor: '#00E5A0', color: '#00E5A0' },
-                '&.Mui-disabled': {
-                  borderColor: chosen === m.name ? '#00E5A0' : 'rgba(255,255,255,0.08)',
-                  color: chosen === m.name ? '#00E5A0' : '#334155',
-                  bgcolor: chosen === m.name ? 'rgba(0,229,160,0.1)' : 'transparent',
-                },
+                bgcolor: '#00E5A0', color: '#0F172A', fontWeight: 700,
+                textTransform: 'none', borderRadius: '10px',
+                '&:hover': { bgcolor: '#00C987' },
+                '&.Mui-disabled': { bgcolor: 'rgba(0,229,160,0.12)', color: '#334155' },
               }}
             >
-              <MedicationIcon sx={{ fontSize: 13, mr: 0.5 }} />
-              {m.name}{m.strength ? ` ${m.strength}` : ''}
+              {dispatched
+                ? 'Searching for pharmacists…'
+                : selected.size === 0
+                  ? 'Select at least one'
+                  : `Find who has ${selected.size === 1 ? 'this' : `these ${selected.size}`} →`}
             </Button>
-          ))}
-        </Box>
+          </>
+        )}
       </Box>
     </Box>
   );

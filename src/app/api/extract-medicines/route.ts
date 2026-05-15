@@ -16,9 +16,10 @@ export async function POST(req: NextRequest) {
       model: 'gemma-4-26b-a4b-it',
       systemInstruction:
         'You are a medicine extraction AI. Output ONLY valid JSON:\n' +
-        '{"medicines":[{"name":"string","strength":"string|null","form":"string|null","quantity":number|null}],"needsConfirmation":false}\n\n' +
-        'Set needsConfirmation=false when the patient named a specific medicine directly.\n' +
-        'Set needsConfirmation=true when the patient described a condition or symptom — suggest 2-4 common first-line medicines.\n' +
+        '{"medicines":[{"name":"string","strength":"string|null","form":"string|null","quantity":number|null}],"needsConfirmation":false,"condition":null}\n\n' +
+        'Rules:\n' +
+        '- needsConfirmation=false, condition=null: patient named a specific medicine → extract it directly\n' +
+        '- needsConfirmation=true, condition="short condition name": patient described a condition/symptom → suggest 2-4 first-line medicines, set condition to concise name e.g. "malaria", "high blood pressure", "diabetes"\n' +
         'No markdown. No explanation. Just JSON.',
       generationConfig: { temperature: 0.1, maxOutputTokens: 300 },
     });
@@ -33,8 +34,9 @@ JSON:`;
 
     let medicinesRaw: unknown[] = [];
     let needsConfirmation = false;
+    let condition: string | null = null;
 
-    // Try object format first (includes needsConfirmation)
+    // Try object format first (includes needsConfirmation + condition)
     const objMatch = raw.match(/\{[\s\S]*\}/);
     if (objMatch) {
       try {
@@ -42,6 +44,7 @@ JSON:`;
         if (parsed && typeof parsed === 'object') {
           medicinesRaw = Array.isArray(parsed.medicines) ? parsed.medicines : [];
           needsConfirmation = parsed.needsConfirmation === true;
+          condition = typeof parsed.condition === 'string' && parsed.condition ? parsed.condition : null;
         }
       } catch { /* fall through */ }
     }
@@ -59,7 +62,7 @@ JSON:`;
 
     if (medicinesRaw.length === 0) {
       console.error('[extract-medicines] no JSON found');
-      return NextResponse.json({ medicines: [], needsConfirmation: false });
+      return NextResponse.json({ medicines: [], needsConfirmation: false, condition: null });
     }
 
     const medicines = medicinesRaw
@@ -70,9 +73,9 @@ JSON:`;
       })
       .filter(Boolean);
 
-    return NextResponse.json({ medicines, needsConfirmation });
+    return NextResponse.json({ medicines, needsConfirmation, condition });
   } catch (err) {
     console.error('[extract-medicines]', err);
-    return NextResponse.json({ medicines: [], needsConfirmation: false });
+    return NextResponse.json({ medicines: [], needsConfirmation: false, condition: null });
   }
 }
