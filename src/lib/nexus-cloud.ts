@@ -1,18 +1,7 @@
-// Nexus Cloud — Google AI SDK wrapper for Gemma 4 cloud inference
-// Model: gemma-4-26b-a4b-it (MoE, 4B active params, natively multimodal — text + vision)
+// Nexus Cloud — client-side proxy for Gemma 4 cloud inference.
+// The Google AI SDK and API key live server-side only (/api/infer, /api/vision-infer).
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { nexusLogger } from './nexus-logger';
-
-let genAI: GoogleGenerativeAI | null = null;
-
-function getClient(): GoogleGenerativeAI {
-  if (!genAI) {
-    const key = process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
-    genAI = new GoogleGenerativeAI(key);
-  }
-  return genAI;
-}
 
 export interface CloudInferOptions {
   systemPrompt?: string;
@@ -20,9 +9,7 @@ export interface CloudInferOptions {
   temperature?: number;
 }
 
-// 60s per attempt — the thinking model takes 12-45s depending on question complexity.
-// Cutting off too early causes the server-side request to keep running, then a second
-// request stacks up and gets a 500. 60s covers even the heaviest queries.
+// 60s — the thinking model takes 12-45s per query; 60s covers even heavy ones.
 const GEMMA_TIMEOUT_MS = 60_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -34,18 +21,21 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
-function buildGemma4Model(options?: CloudInferOptions) {
-  return getClient().getGenerativeModel({
-    model: 'gemma-4-26b-a4b-it',
-    systemInstruction: options?.systemPrompt,
-    generationConfig: {
-      maxOutputTokens: options?.maxTokens ?? 800,
-      temperature: options?.temperature ?? 0.7,
-    },
+async function postInfer(url: string, body: object): Promise<string> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(`[${res.status}] ${err.error ?? res.statusText}`);
+  }
+  const data = await res.json();
+  if (!data.text) throw new Error('Empty response from inference API');
+  return data.text;
 }
 
-// Tries Gemma 4 up to maxAttempts times. Returns the text on success, null if all attempts fail.
 async function tryGemma4(generateFn: () => Promise<string>, maxAttempts = 2): Promise<string | null> {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
@@ -65,10 +55,7 @@ async function tryGemma4(generateFn: () => Promise<string>, maxAttempts = 2): Pr
 export async function cloudInfer(prompt: string, options?: CloudInferOptions): Promise<string> {
   const start = performance.now();
 
-  // Primary path — Gemma 4
-  const gemmaText = await tryGemma4(() =>
-    buildGemma4Model(options).generateContent(prompt).then((r) => r.response.text().trim())
-  );
+  const gemmaText = await tryGemma4(() => postInfer('/api/infer', { prompt, options }));
 
   if (gemmaText !== null) {
     const duration = Math.round(performance.now() - start);
@@ -86,12 +73,9 @@ export async function cloudVisionInfer(
   options?: CloudInferOptions
 ): Promise<string> {
   const start = performance.now();
-  const base64Data = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
-  const parts = [prompt, { inlineData: { data: base64Data, mimeType } }] as const;
 
-  // Primary path — Gemma 4 Vision
   const gemmaText = await tryGemma4(() =>
-    buildGemma4Model(options).generateContent([...parts]).then((r) => r.response.text().trim())
+    postInfer('/api/vision-infer', { prompt, imageBase64, mimeType, options })
   );
 
   if (gemmaText !== null) {
