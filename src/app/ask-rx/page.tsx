@@ -16,7 +16,7 @@ import MedicationIcon from '@mui/icons-material/Medication';
 import ThumbDownOutlinedIcon from '@mui/icons-material/ThumbDownOutlined';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNexusBrain } from '@/components/NexusBrainProvider';
-import { reportFeedback, type FailurePattern } from '@/lib/nexus-safety';
+import { reportFeedback, logRoutingFailure, type FailurePattern } from '@/lib/nexus-safety';
 import { useRouter } from 'next/navigation';
 import type { ConsultResult, Medicine } from '@/lib/nexus-brain';
 import type { PharmacistResponse } from '@/lib/dispatch-store';
@@ -284,8 +284,26 @@ export default function NexusPage() {
           }
         }
       } catch { /* fall through */ }
+
+      // Safety routing check: condition queries must NEVER reach the clarification fallback
+      if (isConditionQuery(messageText)) {
+        logRoutingFailure(messageText, 'condition_suggestion', 'clarification_fallback');
+        const condition = extractConditionName(messageText);
+        let retryMeds: Medicine[] = [];
+        try {
+          const retryRes = await fetch('/api/extract-medicines', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: `medicines for ${condition ?? messageText}` }),
+          });
+          if (retryRes.ok) retryMeds = (await retryRes.json()).medicines ?? [];
+        } catch { /* fall through */ }
+        setExtracting(false);
+        addMsg({ role: 'suggestion', text: '', suggestedMedicines: retryMeds, condition, originalQuery: messageText });
+        return;
+      }
+
       setExtracting(false);
-      // Looked like a request but no medicine found — ask for clarification
       addMsg({ role: 'ai', text: "I couldn't identify a specific medicine in that. Could you name the medicine you need? For example: \"I need amoxicillin 500mg\"." });
       return;
     }

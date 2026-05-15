@@ -13,7 +13,8 @@ export type FailurePattern =
   | 'excessive_length'
   | 'preamble'
   | 'disclaimer'
-  | 'hallucination';
+  | 'hallucination'
+  | 'wrong_routing';
 
 export type SafetyFeature = 'askrx' | 'scanner' | 'search' | 'whatsapp';
 
@@ -260,6 +261,31 @@ export function reportFeedback(feature: SafetyFeature, pattern: FailurePattern, 
   });
 }
 
+// Called when the routing engine would have sent a condition/symptom query to
+// the wrong handler. Safety layer intercepts, auto-corrects, and logs it.
+export function logRoutingFailure(trigger: string, expectedRoute: string, actualRoute: string): void {
+  sessionStats.totalFailures++;
+  sessionStats.patternCounts['wrong_routing'] = (sessionStats.patternCounts['wrong_routing'] ?? 0) + 1;
+
+  runtimeLog.push({
+    id: `rt_${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    feature: 'askrx',
+    pattern: 'wrong_routing',
+    trigger: trigger.substring(0, 150),
+    bad_output_sample: `Expected: ${expectedRoute} | Intercepted: ${actualRoute}`,
+    correction_applied: true,
+    auto_detected: true,
+  });
+
+  addEvent({
+    type: 'corrected',
+    feature: 'askrx',
+    patterns: ['wrong_routing'],
+    message: `Routing corrected: "${trigger.substring(0, 40)}…" → ${expectedRoute}`,
+  });
+}
+
 export function logScannerResult(report: ScanSafetyReport, feature: SafetyFeature = 'scanner'): void {
   if (report.confidence !== 'High') {
     sessionStats.totalFailures++;
@@ -316,6 +342,7 @@ const CORRECTION_RULES: Record<FailurePattern, string> = {
   off_topic: 'Answer only with pharmaceutical/clinical information directly relevant to the question.',
   incomplete: 'Complete the response. End with a full sentence.',
   hallucination: 'Verify the drug name and dose carefully. Only state what you can confirm.',
+  wrong_routing: 'Route condition/symptom queries to the medicine suggestion flow, never to a clarification prompt.',
 };
 
 export function buildRetrySystemPrompt(basePrompt: string, patterns: FailurePattern[]): string {
