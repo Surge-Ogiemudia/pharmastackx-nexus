@@ -442,7 +442,7 @@ export default function AskRXPage() {
               <SmartToyIcon sx={{ color: '#fff', fontSize: 32 }} />
             </Box>
             <Typography sx={{ color: '#64748B', textAlign: 'center', maxWidth: 400 }}>
-              Ask any medicine question. I'm powered by Gemma 4 and specialize in the Nigerian pharmaceutical context.
+              Ask any medicine question. Powered by Gemma 4 — dosage, interactions, side effects, and more.
             </Typography>
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, justifyContent: 'center', maxWidth: 500 }}>
               {SUGGESTED_QUESTIONS.map((q, i) => (

@@ -76,7 +76,7 @@
       "feature": "whatsapp",
       "pattern": "hallucination",
       "trigger": "pls do we have coartem in stock",
-      "bad_output_sample": "{\"medicines\": [{\"name\": \"Coartem\", \"strength\": \"80/480mg\", \"quantity\": 24}], \"location\": \"Lagos\", \"confidence\": 0.95}",
+      "bad_output_sample": "{\"medicines\": [{\"name\": \"Coartem\", \"strength\": \"80/480mg\", \"quantity\": 24}], \"location\": null, \"confidence\": 0.95}",
       "correction_applied": false,
       "auto_detected": false
     },
