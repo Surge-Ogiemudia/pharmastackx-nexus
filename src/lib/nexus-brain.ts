@@ -446,13 +446,16 @@ Category:`;
       ? history.slice(-6).map((h) => `${h.role === 'user' ? 'User' : 'Pharmacist'}: ${h.text}`).join('\n') + '\n'
       : '';
     const prompt = `${contextMessages}User: ${message}\nPharmacist:`;
-    const guardedSystem = buildGuardedSystemPrompt(ASKRX_SYSTEM);
+    // Use plain system prompt for streaming — buildGuardedSystemPrompt appends correction rules
+    // like "Do NOT output lines starting with *" which confuse the model into echoing them as
+    // *-bullet preambles, exhausting the token budget before the actual answer.
+    const systemPrompt = ASKRX_SYSTEM;
 
     let rawText: string;
     try {
       rawText = await cloudInferStream(
         prompt,
-        { systemPrompt: guardedSystem, temperature: 0.4, maxTokens: 120 },
+        { systemPrompt, temperature: 0.4, maxTokens: 150 },
         onChunk
       );
     } catch {
@@ -476,7 +479,21 @@ Category:`;
     trackResponse();
 
     if (!clean || clean.length < 5) {
-      return { text: "That's outside pharmacy — see a physician.", flagged: false, patternsDetected: [], corrected: false };
+      // Model echoed system instructions instead of answering (all content stripped as *-lines).
+      // Retry with a direct, minimal prompt — no system instruction overhead.
+      nexusLogger.emit('SYSTEM', '🛡️ Response stripped to empty — retrying with direct prompt...');
+      logFailure({ feature: 'askrx', patterns: ['thinking_leak'], trigger: message, bad_output_sample: rawText.substring(0, 200), auto_detected: true });
+      try {
+        const directPrompt = `You are a clinical pharmacist. Answer in 2-3 sentences: name the drug, dose, frequency.\n\nQuestion: ${message}\n\nAnswer:`;
+        const directResponse = await cloudInfer(directPrompt, { temperature: 0.2, maxTokens: 150 });
+        const directClean = stripSystemLeaks(stripThinking(directResponse));
+        if (directClean.length >= 5) {
+          logCorrectionResult(true, 'askrx', ['thinking_leak']);
+          return { text: directClean, flagged: false, patternsDetected: ['thinking_leak'], corrected: true };
+        }
+      } catch { /* fall through */ }
+      logCorrectionResult(false, 'askrx', ['thinking_leak']);
+      throw new Error('Gemma 4 is temporarily unavailable — please try again in a moment.');
     }
 
     if (rawClean !== clean) {
@@ -495,9 +512,9 @@ Category:`;
       if (isCritical) {
         nexusLogger.emit('SYSTEM', `🛡️ Safety: ${validation.patterns.join(' + ')} detected — retrying...`);
         try {
-          const retrySystem = buildRetrySystemPrompt(guardedSystem, validation.patterns);
+          const retrySystem = buildRetrySystemPrompt(systemPrompt, validation.patterns);
           const retryResponse = await this.infer(prompt, {
-            systemPrompt: retrySystem, temperature: 0.3, maxTokens: 120,
+            systemPrompt: retrySystem, temperature: 0.3, maxTokens: 150,
             allowEdgeFallback: true, edgeSystemPrompt: ASKRX_EDGE_SYSTEM,
           });
           const retryClean = stripSystemLeaks(stripThinking(retryResponse));
@@ -865,6 +882,7 @@ function stripThinking(text: string): string {
       .replace(/\*[^*\n]{0,300}\*/g, '')
       .replace(/^\s*\*.*$/gm, '')
       .trim();
+    if (!withoutBlocks) return ''; // all content was *-lines (system prompt echo) — signal garbage to caller
     const sentences = withoutBlocks.split(/(?<=[.!?])\s+/).filter((s) => s.trim().length > 15);
     if (sentences.length > 0) return sentences.slice(0, 3).join(' ').trim();
   }
