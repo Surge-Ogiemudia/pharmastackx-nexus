@@ -23,6 +23,14 @@ import type { PharmacistResponse } from '@/lib/dispatch-store';
 
 type MessageRole = 'user' | 'ai' | 'system' | 'dispatch' | 'suggestion' | 'detail_form';
 
+interface SuggestedAction {
+  type: 'find_medicine' | 'condition_search';
+  medicines?: Medicine[];
+  condition?: string | null;
+  suggestedMedicines?: Medicine[];
+  originalQuery?: string;
+}
+
 interface Message {
   id: string;
   role: MessageRole;
@@ -37,6 +45,7 @@ interface Message {
   condition?: string;
   originalQuery?: string;
   pendingMedicines?: Medicine[];
+  suggestedAction?: SuggestedAction;
 }
 
 const SUGGESTED = [
@@ -53,7 +62,6 @@ export default function NexusPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [extracting, setExtracting] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [attachedImage, setAttachedImage] = useState<{ base64: string; mimeType: string; preview: string } | null>(null);
@@ -180,6 +188,20 @@ export default function NexusPage() {
     setPendingMedicines([]);
   };
 
+  const handleSuggestedAction = (action: SuggestedAction) => {
+    if (action.type === 'find_medicine' && action.medicines?.length) {
+      addMsg({ role: 'detail_form', text: '', pendingMedicines: action.medicines });
+    } else if (action.type === 'condition_search') {
+      addMsg({
+        role: 'suggestion',
+        text: '',
+        suggestedMedicines: action.suggestedMedicines ?? [],
+        condition: action.condition ?? undefined,
+        originalQuery: action.originalQuery,
+      });
+    }
+  };
+
   const consultFromCondition = async (query: string) => {
     setLoading(true);
     try {
@@ -199,7 +221,7 @@ export default function NexusPage() {
     const messageText = text ?? input.trim();
     const image = attachedImage;
     if (!messageText && !image) return;
-    if (loading || extracting) return;
+    if (loading) return;
 
     addMsg({ role: 'user', text: messageText, imagePreview: image?.preview });
     setInput('');
@@ -238,60 +260,54 @@ export default function NexusPage() {
       return;
     }
 
-    // Text path: single classify-intent call — Gemma decides what to do
-    setExtracting(true);
-    let intent = 'consultation';
-    let classifiedMedicines: Medicine[] = [];
-    let condition: string | null = null;
-    let suggestedMedicines: Medicine[] = [];
+    // Text path: classify intent and consult Gemma simultaneously, then confirm with user
+    setLoading(true);
     try {
       const ctx = messages.filter((m) => m.role === 'user' || m.role === 'ai').slice(-4)
         .map((m) => ({ role: m.role, text: m.text }));
-      const classifyRes = await fetch('/api/classify-intent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: messageText, history: ctx }),
-      });
-      if (classifyRes.ok) {
-        const data = await classifyRes.json();
-        intent = data.intent ?? 'consultation';
-        classifiedMedicines = data.medicines ?? [];
-        condition = data.condition ?? null;
-        suggestedMedicines = data.suggestedMedicines ?? [];
-      }
-    } catch { /* fall through to consultation */ }
-    setExtracting(false);
-
-    if (intent === 'find_medicine') {
-      if (classifiedMedicines.length > 0) {
-        await triggerDispatch(classifiedMedicines);
-      } else {
-        addMsg({ role: 'ai', text: "Which medicine are you looking for? You can say something like \"I need amoxicillin 500mg\"." });
-      }
-      return;
-    }
-
-    if (intent === 'condition_search') {
-      // Safety: if Gemma returned no suggestions, log a routing check but still show the card
-      if (suggestedMedicines.length === 0) {
-        logRoutingFailure(messageText, 'condition_suggestion', 'empty_suggestions');
-      }
-      addMsg({ role: 'suggestion', text: '', suggestedMedicines, condition: condition ?? undefined, originalQuery: messageText });
-      return;
-    }
-
-    if (intent === 'scan') {
-      addMsg({ role: 'ai', text: 'Tap the camera icon below to scan your prescription or medicine.' });
-      return;
-    }
-
-    // consultation (default)
-    setLoading(true);
-    try {
-      const history = messages.filter((m) => m.role === 'user' || m.role === 'ai').slice(-6)
+      const consultHistory = messages.filter((m) => m.role === 'user' || m.role === 'ai').slice(-6)
         .map((m) => ({ role: m.role === 'user' ? 'user' : 'model', text: m.text }));
-      const result: ConsultResult = await brain.consult(messageText, history);
-      addMsg({ role: 'ai', text: result.text, flagged: result.flagged, patternsDetected: result.patternsDetected });
+
+      const [classifyData, consultResult] = await Promise.all([
+        fetch('/api/classify-intent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: messageText, history: ctx }),
+        }).then((r) => r.ok ? r.json() : null).catch(() => null),
+        brain.consult(messageText, consultHistory),
+      ]);
+
+      const intent: string = classifyData?.intent ?? 'consultation';
+
+      // Scan: skip consultation, just prompt camera
+      if (intent === 'scan') {
+        addMsg({ role: 'ai', text: 'Tap the camera icon below to scan your prescription or medicine.' });
+        return;
+      }
+
+      // Attach a confirmation action button — Gemma never acts without user tap
+      let suggestedAction: SuggestedAction | undefined;
+      if (intent === 'find_medicine' && classifyData?.medicines?.length > 0) {
+        suggestedAction = { type: 'find_medicine', medicines: classifyData.medicines };
+      } else if (intent === 'condition_search') {
+        if (!classifyData?.suggestedMedicines?.length) {
+          logRoutingFailure(messageText, 'condition_suggestion', 'empty_suggestions');
+        }
+        suggestedAction = {
+          type: 'condition_search',
+          condition: classifyData?.condition ?? null,
+          suggestedMedicines: classifyData?.suggestedMedicines ?? [],
+          originalQuery: messageText,
+        };
+      }
+
+      addMsg({
+        role: 'ai',
+        text: consultResult.text,
+        flagged: consultResult.flagged,
+        patternsDetected: consultResult.patternsDetected,
+        suggestedAction,
+      });
     } catch (err) {
       addMsg({ role: 'ai', text: err instanceof Error ? err.message : 'Unknown error' });
     } finally {
@@ -379,13 +395,13 @@ export default function NexusPage() {
                   <Typography sx={{ fontSize: '0.75rem', color: '#00E5A0', fontStyle: 'italic' }}>{msg.text}</Typography>
                 </Box>
               ) : (
-                <MessageBubble msg={msg} />
+                <MessageBubble msg={msg} onSuggestedAction={handleSuggestedAction} />
               )}
             </motion.div>
           ))}
         </AnimatePresence>
 
-        {(loading || extracting) && (
+        {loading && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
               <Avatar sx={{ width: 32, height: 32, bgcolor: 'rgba(0,229,160,0.15)' }}>
@@ -394,7 +410,7 @@ export default function NexusPage() {
               <Box sx={{ px: 2, py: 1.5, borderRadius: '4px 16px 16px 16px', bgcolor: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: 1 }}>
                 <CircularProgress size={14} sx={{ color: '#00E5A0' }} />
                 <Typography variant="body2" sx={{ color: '#64748B', fontSize: '0.8rem' }}>
-                  {extracting ? 'Identifying medicines…' : 'Gemma 4 is thinking…'}
+                  Gemma 4 is thinking…
                 </Typography>
               </Box>
             </Box>
@@ -444,7 +460,7 @@ export default function NexusPage() {
             placeholder={transcribing ? 'Gemma 4 is correcting medical terms...' : recording ? 'Listening…' : 'Ask anything, or say what medicine you need…'}
             value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown}
             variant="standard" slotProps={{ input: { disableUnderline: true, sx: { color: '#E0F2F1', fontSize: '0.9rem' } } }} sx={{ flex: 1 }} />
-          <IconButton onClick={() => sendMessage()} disabled={(!input.trim() && !attachedImage) || loading || extracting}
+          <IconButton onClick={() => sendMessage()} disabled={(!input.trim() && !attachedImage) || loading}
             sx={{ color: (input.trim() || attachedImage) ? '#00E5A0' : '#475569', '&:hover': { color: '#4ADE80' }, flexShrink: 0 }}>
             <SendIcon />
           </IconButton>
@@ -872,11 +888,12 @@ const FEEDBACK_OPTIONS: { pattern: FailurePattern; label: string }[] = [
   { pattern: 'excessive_length', label: 'Too long' },
 ];
 
-function MessageBubble({ msg }: { msg: Message }) {
+function MessageBubble({ msg, onSuggestedAction }: { msg: Message; onSuggestedAction?: (a: SuggestedAction) => void }) {
   const isUser = msg.role === 'user';
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [selectedPattern, setSelectedPattern] = useState<FailurePattern | null>(null);
   const [feedbackDone, setFeedbackDone] = useState(false);
+  const [actionTaken, setActionTaken] = useState(false);
 
   const submitFeedback = () => {
     if (!selectedPattern) return;
@@ -900,6 +917,32 @@ function MessageBubble({ msg }: { msg: Message }) {
         }}>
           {msg.imagePreview && <Box component="img" src={msg.imagePreview} alt="Attached" sx={{ maxWidth: '100%', maxHeight: 200, borderRadius: '8px', display: 'block', mb: msg.text ? 1 : 0 }} />}
           <Typography variant="body2" sx={{ color: '#E0F2F1', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{msg.text}</Typography>
+          {msg.suggestedAction && !isUser && (
+            <Box
+              onClick={() => {
+                if (actionTaken || !onSuggestedAction) return;
+                setActionTaken(true);
+                onSuggestedAction(msg.suggestedAction!);
+              }}
+              sx={{
+                mt: 1.25, px: 1.5, py: 0.9, borderRadius: '8px', cursor: actionTaken ? 'default' : 'pointer',
+                border: `1px solid ${actionTaken ? 'rgba(0,229,160,0.15)' : 'rgba(0,229,160,0.35)'}`,
+                bgcolor: actionTaken ? 'rgba(0,229,160,0.03)' : 'rgba(0,229,160,0.07)',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                transition: 'all 0.15s',
+                '&:hover': !actionTaken ? { bgcolor: 'rgba(0,229,160,0.12)', borderColor: '#00E5A0' } : {},
+              }}
+            >
+              <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: actionTaken ? '#475569' : '#00E5A0' }}>
+                {actionTaken
+                  ? 'On it…'
+                  : msg.suggestedAction.type === 'find_medicine'
+                    ? `Find ${msg.suggestedAction.medicines![0].name}${msg.suggestedAction.medicines!.length > 1 ? ` +${msg.suggestedAction.medicines!.length - 1} more` : ''} near me`
+                    : `Show me medicines for ${msg.suggestedAction.condition ?? 'this condition'}`}
+              </Typography>
+              {!actionTaken && <Typography sx={{ fontSize: '0.8rem', color: '#00E5A0' }}>→</Typography>}
+            </Box>
+          )}
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: isUser ? 'flex-end' : 'space-between', mt: 0.5 }}>
             <Typography sx={{ fontSize: '0.6rem', color: '#475569' }}>{msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Typography>
             {msg.role === 'ai' && !feedbackDone && (
