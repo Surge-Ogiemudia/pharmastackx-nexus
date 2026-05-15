@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ requestId: id });
   } catch (err) {
     console.error('[dispatch POST]', err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to create request' }, { status: 500 });
   }
 }
 
@@ -24,6 +24,6 @@ export async function GET() {
     return NextResponse.json({ requests });
   } catch (err) {
     console.error('[dispatch GET]', err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to fetch requests' }, { status: 500 });
   }
 }
