@@ -11,7 +11,7 @@ import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import SearchIcon from '@mui/icons-material/Search';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
 import HomeIcon from '@mui/icons-material/Home';
-import LocalPharmacyIcon from '@mui/icons-material/LocalPharmacy';
+
 import WifiOffIcon from '@mui/icons-material/WifiOff';
 import CloudIcon from '@mui/icons-material/Cloud';
 import TerminalIcon from '@mui/icons-material/Terminal';
@@ -31,7 +31,7 @@ const NAV_ITEMS: NavItem[] = [
   { path: '/ask-rx', Icon: ChatIcon, label: 'AskRX' },
   { path: '/scanner', Icon: CameraAltIcon, label: 'Scanner' },
   { path: '/search', Icon: SearchIcon, label: 'Search' },
-  { path: '/pharmacist', Icon: LocalPharmacyIcon, label: 'Pharmacy' },
+
   { path: '/whatsapp', Icon: WhatsAppIcon, label: 'WhatsApp' },
 ];
 
