@@ -54,6 +54,18 @@ function looksLikeRequest(text: string): boolean {
   return true;
 }
 
+// Returns true when user described a condition/symptom rather than a specific medicine name
+function isConditionQuery(text: string): boolean {
+  return /\b(something for|options? for|medicine for|drug for|medication for|treatment for|identify|what (to|should|can) (take|use)|forgot|can.?t remem|which (medicine|drug|tablet)|give me.*option|my (condition|symptoms?|illness|bp|sugar|pressure|cholesterol))\b/i.test(text);
+}
+
+// Extract condition name from query for card copy, e.g. "high BP" from "something for high BP"
+function extractConditionName(text: string): string | undefined {
+  const m = text.match(/(?:something|medicine|drug|medication|treatment|options?)\s+for\s+([\w\s]+?)(?:\s*[,.!?]|$)/i)
+    ?? text.match(/(?:my|identify|find).*?\b(bp|blood pressure|malaria|diabetes|hypertension|fever|pain|infection|cholesterol)\b/i);
+  return m ? m[1].trim() : undefined;
+}
+
 export default function NexusPage() {
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -254,11 +266,16 @@ export default function NexusPage() {
           body: JSON.stringify({ query: messageText }),
         });
         if (extractRes.ok) {
-          const { medicines, needsConfirmation, condition }: { medicines: Medicine[]; needsConfirmation: boolean; condition?: string } = await extractRes.json();
+          const { medicines }: { medicines: Medicine[] } = await extractRes.json();
           if (medicines?.length > 0) {
             setExtracting(false);
-            if (needsConfirmation) {
-              addMsg({ role: 'suggestion', text: '', suggestedMedicines: medicines, condition, originalQuery: messageText });
+            if (isConditionQuery(messageText)) {
+              addMsg({
+                role: 'suggestion', text: '',
+                suggestedMedicines: medicines,
+                condition: extractConditionName(messageText),
+                originalQuery: messageText,
+              });
             } else {
               await triggerDispatch(medicines);
             }

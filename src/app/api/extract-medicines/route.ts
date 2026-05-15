@@ -15,57 +15,31 @@ export async function POST(req: NextRequest) {
     const model = genAI.getGenerativeModel({
       model: 'gemma-4-26b-a4b-it',
       systemInstruction:
-        'You are a medicine extraction AI. Output ONLY valid JSON:\n' +
-        '{"medicines":[{"name":"string","strength":"string|null","form":"string|null","quantity":number|null}],"needsConfirmation":false,"condition":null}\n\n' +
-        'Rules:\n' +
-        '- needsConfirmation=false, condition=null: patient named a specific medicine → extract it directly\n' +
-        '- needsConfirmation=true, condition="short condition name": patient described a condition/symptom → suggest 2-4 first-line medicines, set condition to concise name e.g. "malaria", "high blood pressure", "diabetes"\n' +
-        'No markdown. No explanation. Just JSON.',
+        'You are a medicine extraction AI. Output ONLY a JSON array of medicine objects with fields: name, strength, form, quantity. ' +
+        'Example: [{"name":"Amoxicillin","strength":"500mg","form":"Capsule","quantity":null}]. ' +
+        'For condition-based requests (e.g. "something for malaria"), suggest 2-4 common first-line medicines. ' +
+        'Use null for unknown fields. No explanation. No markdown. Just the JSON array.',
       generationConfig: { temperature: 0.1, maxOutputTokens: 300 },
     });
 
     const prompt = `Patient: "${query}"
 
-JSON:`;
+JSON array of medicines:`;
 
     const result = await model.generateContent(prompt);
     const raw = result.response.text().trim();
     console.log('[extract-medicines] raw:', raw.substring(0, 300));
 
-    let medicinesRaw: unknown[] = [];
-    let needsConfirmation = false;
-    let condition: string | null = null;
-
-    // Try object format first (includes needsConfirmation + condition)
-    const objMatch = raw.match(/\{[\s\S]*\}/);
-    if (objMatch) {
-      try {
-        const parsed = JSON.parse(objMatch[0]);
-        if (parsed && typeof parsed === 'object') {
-          medicinesRaw = Array.isArray(parsed.medicines) ? parsed.medicines : [];
-          needsConfirmation = parsed.needsConfirmation === true;
-          condition = typeof parsed.condition === 'string' && parsed.condition ? parsed.condition : null;
-        }
-      } catch { /* fall through */ }
+    const arrayMatch = raw.match(/\[[\s\S]*?\]/);
+    if (!arrayMatch) {
+      console.error('[extract-medicines] no JSON array found');
+      return NextResponse.json({ medicines: [] });
     }
 
-    // Fallback: array-only format
-    if (medicinesRaw.length === 0) {
-      const arrMatch = raw.match(/\[[\s\S]*?\]/);
-      if (arrMatch) {
-        try {
-          const arr = JSON.parse(arrMatch[0]);
-          medicinesRaw = Array.isArray(arr) ? arr : [];
-        } catch { /* fall through */ }
-      }
-    }
+    const parsed = JSON.parse(arrayMatch[0]);
+    if (!Array.isArray(parsed)) return NextResponse.json({ medicines: [] });
 
-    if (medicinesRaw.length === 0) {
-      console.error('[extract-medicines] no JSON found');
-      return NextResponse.json({ medicines: [], needsConfirmation: false, condition: null });
-    }
-
-    const medicines = medicinesRaw
+    const medicines = parsed
       .map((m: unknown) => {
         if (typeof m === 'string' && m.trim()) return { name: m.trim(), strength: null, form: null, quantity: null };
         if (typeof m === 'object' && m !== null && 'name' in m) return m;
@@ -73,9 +47,9 @@ JSON:`;
       })
       .filter(Boolean);
 
-    return NextResponse.json({ medicines, needsConfirmation, condition });
+    return NextResponse.json({ medicines });
   } catch (err) {
     console.error('[extract-medicines]', err);
-    return NextResponse.json({ medicines: [], needsConfirmation: false, condition: null });
+    return NextResponse.json({ medicines: [] });
   }
 }
