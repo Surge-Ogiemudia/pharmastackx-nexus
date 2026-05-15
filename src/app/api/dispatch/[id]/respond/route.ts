@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { addResponse } from '@/lib/dispatch-store';
 import type { PharmacistResponse } from '@/lib/dispatch-store';
 
-// POST — pharmacist submits their response to a request
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -22,7 +21,7 @@ export async function POST(
       respondedAt: new Date().toISOString(),
     };
 
-    const result = addResponse(id, response);
+    const result = await addResponse(id, response);
     if (result === 'not_found') return NextResponse.json({ error: 'Request not found' }, { status: 404 });
     if (result === 'duplicate') return NextResponse.json({ error: 'Already responded' }, { status: 409 });
 
