@@ -47,25 +47,6 @@ const SUGGESTED = [
   'I need something for high BP',
 ];
 
-// Returns true if message looks like a medicine request (not a question)
-function looksLikeRequest(text: string): boolean {
-  const q = text.trim().toLowerCase();
-  if (/^(what is|what are|how do|how does|how to|why is|why does|is it|is this|are there|can i take|can you|should i|tell me|explain|i wonder)/i.test(q)) return false;
-  if (/(side effect|adverse|dosage|dose of|interact|overdose|pregnant|safe during|how to take|how long|difference between|\bvs\b|versus)/i.test(q)) return false;
-  return true;
-}
-
-// Returns true when user described a condition/symptom rather than a specific medicine name
-function isConditionQuery(text: string): boolean {
-  return /\b(something for|options? for|medicine for|drug for|medication for|treatment for|identify|what (to|should|can) (take|use)|forgot|can.?t remem|which (medicine|drug|tablet)|give me.*option|my (condition|symptoms?|illness|bp|sugar|pressure|cholesterol))\b/i.test(text);
-}
-
-// Extract condition name from query for card copy, e.g. "high BP" from "something for high BP"
-function extractConditionName(text: string): string | undefined {
-  const m = text.match(/(?:something|medicine|drug|medication|treatment|options?)\s+for\s+([\w\s]+?)(?:\s*[,.!?]|$)/i)
-    ?? text.match(/(?:my|identify|find).*?\b(bp|blood pressure|malaria|diabetes|hypertension|fever|pain|infection|cholesterol)\b/i);
-  return m ? m[1].trim() : undefined;
-}
 
 export default function NexusPage() {
   const router = useRouter();
@@ -257,58 +238,54 @@ export default function NexusPage() {
       return;
     }
 
-    // Text path: check intent
-    if (looksLikeRequest(messageText)) {
-      setExtracting(true);
-      try {
-        const extractRes = await fetch('/api/extract-medicines', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: messageText }),
-        });
-        if (extractRes.ok) {
-          const { medicines }: { medicines: Medicine[] } = await extractRes.json();
-          if (medicines?.length > 0) {
-            setExtracting(false);
-            if (isConditionQuery(messageText)) {
-              addMsg({
-                role: 'suggestion', text: '',
-                suggestedMedicines: medicines,
-                condition: extractConditionName(messageText),
-                originalQuery: messageText,
-              });
-            } else {
-              await triggerDispatch(medicines);
-            }
-            return;
-          }
-        }
-      } catch { /* fall through */ }
-
-      // Safety routing check: condition queries must NEVER reach the clarification fallback
-      if (isConditionQuery(messageText)) {
-        logRoutingFailure(messageText, 'condition_suggestion', 'clarification_fallback');
-        const condition = extractConditionName(messageText);
-        let retryMeds: Medicine[] = [];
-        try {
-          const retryRes = await fetch('/api/extract-medicines', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: `medicines for ${condition ?? messageText}` }),
-          });
-          if (retryRes.ok) retryMeds = (await retryRes.json()).medicines ?? [];
-        } catch { /* fall through */ }
-        setExtracting(false);
-        addMsg({ role: 'suggestion', text: '', suggestedMedicines: retryMeds, condition, originalQuery: messageText });
-        return;
+    // Text path: single classify-intent call — Gemma decides what to do
+    setExtracting(true);
+    let intent = 'consultation';
+    let classifiedMedicines: Medicine[] = [];
+    let condition: string | null = null;
+    let suggestedMedicines: Medicine[] = [];
+    try {
+      const ctx = messages.filter((m) => m.role === 'user' || m.role === 'ai').slice(-4)
+        .map((m) => ({ role: m.role, text: m.text }));
+      const classifyRes = await fetch('/api/classify-intent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: messageText, history: ctx }),
+      });
+      if (classifyRes.ok) {
+        const data = await classifyRes.json();
+        intent = data.intent ?? 'consultation';
+        classifiedMedicines = data.medicines ?? [];
+        condition = data.condition ?? null;
+        suggestedMedicines = data.suggestedMedicines ?? [];
       }
+    } catch { /* fall through to consultation */ }
+    setExtracting(false);
 
-      setExtracting(false);
-      addMsg({ role: 'ai', text: "I couldn't identify a specific medicine in that. Could you name the medicine you need? For example: \"I need amoxicillin 500mg\"." });
+    if (intent === 'find_medicine') {
+      if (classifiedMedicines.length > 0) {
+        await triggerDispatch(classifiedMedicines);
+      } else {
+        addMsg({ role: 'ai', text: "Which medicine are you looking for? You can say something like \"I need amoxicillin 500mg\"." });
+      }
       return;
     }
 
-    // Consultation
+    if (intent === 'condition_search') {
+      // Safety: if Gemma returned no suggestions, log a routing check but still show the card
+      if (suggestedMedicines.length === 0) {
+        logRoutingFailure(messageText, 'condition_suggestion', 'empty_suggestions');
+      }
+      addMsg({ role: 'suggestion', text: '', suggestedMedicines, condition: condition ?? undefined, originalQuery: messageText });
+      return;
+    }
+
+    if (intent === 'scan') {
+      addMsg({ role: 'ai', text: 'Tap the camera icon below to scan your prescription or medicine.' });
+      return;
+    }
+
+    // consultation (default)
     setLoading(true);
     try {
       const history = messages.filter((m) => m.role === 'user' || m.role === 'ai').slice(-6)
