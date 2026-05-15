@@ -21,7 +21,7 @@ import { useRouter } from 'next/navigation';
 import type { ConsultResult, Medicine } from '@/lib/nexus-brain';
 import type { PharmacistResponse } from '@/lib/dispatch-store';
 
-type MessageRole = 'user' | 'ai' | 'system' | 'dispatch';
+type MessageRole = 'user' | 'ai' | 'system' | 'dispatch' | 'suggestion';
 
 interface Message {
   id: string;
@@ -33,6 +33,7 @@ interface Message {
   patternsDetected?: FailurePattern[];
   medicines?: Medicine[];
   requestId?: string;
+  suggestedMedicines?: Medicine[];
 }
 
 const SUGGESTED = [
@@ -237,10 +238,14 @@ export default function NexusPage() {
           body: JSON.stringify({ query: messageText }),
         });
         if (extractRes.ok) {
-          const { medicines }: { medicines: Medicine[] } = await extractRes.json();
+          const { medicines, needsConfirmation }: { medicines: Medicine[]; needsConfirmation: boolean } = await extractRes.json();
           if (medicines?.length > 0) {
             setExtracting(false);
-            await triggerDispatch(medicines);
+            if (needsConfirmation) {
+              addMsg({ role: 'suggestion', text: '', suggestedMedicines: medicines });
+            } else {
+              await triggerDispatch(medicines);
+            }
             return;
           }
         }
@@ -328,6 +333,8 @@ export default function NexusPage() {
             <motion.div key={msg.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
               {msg.role === 'dispatch' && msg.medicines && msg.requestId ? (
                 <DispatchCard medicines={msg.medicines} requestId={msg.requestId} onSelect={(r) => selectPharmacist(r, msg.medicines!)} />
+              ) : msg.role === 'suggestion' && msg.suggestedMedicines ? (
+                <SuggestionCard medicines={msg.suggestedMedicines} onSelect={(m) => triggerDispatch([m])} />
               ) : msg.role === 'system' ? (
                 <Box sx={{ textAlign: 'center', py: 0.5 }}>
                   <Typography sx={{ fontSize: '0.75rem', color: '#00E5A0', fontStyle: 'italic' }}>{msg.text}</Typography>
@@ -515,6 +522,66 @@ function DispatchCard({ medicines, requestId, onSelect }: {
             ))}
           </Box>
         )}
+      </Box>
+    </Box>
+  );
+}
+
+// ── Suggestion card (condition → confirm medicine) ──
+
+function SuggestionCard({ medicines, onSelect }: {
+  medicines: Medicine[];
+  onSelect: (m: Medicine) => void;
+}) {
+  const [chosen, setChosen] = useState<string | null>(null);
+
+  const handlePick = (m: Medicine) => {
+    if (chosen) return;
+    setChosen(m.name);
+    onSelect(m);
+  };
+
+  return (
+    <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
+      <Avatar sx={{ width: 32, height: 32, bgcolor: 'rgba(0,229,160,0.15)', flexShrink: 0 }}>
+        <SmartToyIcon sx={{ fontSize: 18, color: '#00E5A0' }} />
+      </Avatar>
+      <Box sx={{ flex: 1, borderRadius: '4px 16px 16px 16px', bgcolor: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', p: 2 }}>
+        <Typography sx={{ fontSize: '0.85rem', color: '#E0F2F1', mb: 0.5, fontWeight: 500 }}>
+          Did you forget the name? Here are common medicines — does one ring a bell?
+        </Typography>
+        <Typography sx={{ fontSize: '0.75rem', color: '#64748B', mb: 1.5 }}>
+          Tap to order, or type the exact name if you know it.
+        </Typography>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+          {medicines.map((m, i) => (
+            <Button
+              key={i}
+              variant="outlined"
+              size="small"
+              onClick={() => handlePick(m)}
+              disabled={!!chosen}
+              sx={{
+                borderColor: chosen === m.name ? '#00E5A0' : 'rgba(0,229,160,0.3)',
+                color: chosen === m.name ? '#00E5A0' : '#94A3B8',
+                bgcolor: chosen === m.name ? 'rgba(0,229,160,0.1)' : 'transparent',
+                textTransform: 'none',
+                borderRadius: '8px',
+                fontSize: '0.8rem',
+                fontWeight: chosen === m.name ? 700 : 400,
+                '&:hover': { bgcolor: 'rgba(0,229,160,0.08)', borderColor: '#00E5A0', color: '#00E5A0' },
+                '&.Mui-disabled': {
+                  borderColor: chosen === m.name ? '#00E5A0' : 'rgba(255,255,255,0.08)',
+                  color: chosen === m.name ? '#00E5A0' : '#334155',
+                  bgcolor: chosen === m.name ? 'rgba(0,229,160,0.1)' : 'transparent',
+                },
+              }}
+            >
+              <MedicationIcon sx={{ fontSize: 13, mr: 0.5 }} />
+              {m.name}{m.strength ? ` ${m.strength}` : ''}
+            </Button>
+          ))}
+        </Box>
       </Box>
     </Box>
   );

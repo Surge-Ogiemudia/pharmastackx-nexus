@@ -15,45 +15,64 @@ export async function POST(req: NextRequest) {
     const model = genAI.getGenerativeModel({
       model: 'gemma-4-26b-a4b-it',
       systemInstruction:
-        'You are a medicine extraction AI. Output ONLY a JSON array of medicine objects with fields: name, strength, form, quantity. ' +
-        'Example: [{"name":"Amoxicillin","strength":"500mg","form":"Capsule","quantity":null}]. ' +
-        'Use null for unknown fields. No explanation. No markdown. Just the JSON array.',
-      generationConfig: { temperature: 0.1, maxOutputTokens: 256 },
+        'You are a medicine extraction AI. Output ONLY valid JSON:\n' +
+        '{"medicines":[{"name":"string","strength":"string|null","form":"string|null","quantity":number|null}],"needsConfirmation":false}\n\n' +
+        'Set needsConfirmation=false when the patient named a specific medicine directly.\n' +
+        'Set needsConfirmation=true when the patient described a condition or symptom — suggest 2-4 common first-line medicines.\n' +
+        'No markdown. No explanation. Just JSON.',
+      generationConfig: { temperature: 0.1, maxOutputTokens: 300 },
     });
 
     const prompt = `Patient: "${query}"
 
-JSON array of medicines needed:`;
+JSON:`;
 
     const result = await model.generateContent(prompt);
     const raw = result.response.text().trim();
     console.log('[extract-medicines] raw:', raw.substring(0, 300));
 
-    const arrayMatch = raw.match(/\[[\s\S]*?\]/);
-    if (!arrayMatch) {
-      console.error('[extract-medicines] no JSON array found');
-      return NextResponse.json({ medicines: [] });
+    let medicinesRaw: unknown[] = [];
+    let needsConfirmation = false;
+
+    // Try object format first (includes needsConfirmation)
+    const objMatch = raw.match(/\{[\s\S]*\}/);
+    if (objMatch) {
+      try {
+        const parsed = JSON.parse(objMatch[0]);
+        if (parsed && typeof parsed === 'object') {
+          medicinesRaw = Array.isArray(parsed.medicines) ? parsed.medicines : [];
+          needsConfirmation = parsed.needsConfirmation === true;
+        }
+      } catch { /* fall through */ }
     }
 
-    const parsed = JSON.parse(arrayMatch[0]);
-    if (!Array.isArray(parsed)) return NextResponse.json({ medicines: [] });
+    // Fallback: array-only format
+    if (medicinesRaw.length === 0) {
+      const arrMatch = raw.match(/\[[\s\S]*?\]/);
+      if (arrMatch) {
+        try {
+          const arr = JSON.parse(arrMatch[0]);
+          medicinesRaw = Array.isArray(arr) ? arr : [];
+        } catch { /* fall through */ }
+      }
+    }
 
-    // Normalize: handle both string entries and object entries
-    const medicines = parsed
+    if (medicinesRaw.length === 0) {
+      console.error('[extract-medicines] no JSON found');
+      return NextResponse.json({ medicines: [], needsConfirmation: false });
+    }
+
+    const medicines = medicinesRaw
       .map((m: unknown) => {
-        if (typeof m === 'string' && m.trim()) {
-          return { name: m.trim(), strength: null, form: null, quantity: null };
-        }
-        if (typeof m === 'object' && m !== null && 'name' in m) {
-          return m;
-        }
+        if (typeof m === 'string' && m.trim()) return { name: m.trim(), strength: null, form: null, quantity: null };
+        if (typeof m === 'object' && m !== null && 'name' in m) return m;
         return null;
       })
       .filter(Boolean);
 
-    return NextResponse.json({ medicines });
+    return NextResponse.json({ medicines, needsConfirmation });
   } catch (err) {
     console.error('[extract-medicines]', err);
-    return NextResponse.json({ medicines: [] });
+    return NextResponse.json({ medicines: [], needsConfirmation: false });
   }
 }
