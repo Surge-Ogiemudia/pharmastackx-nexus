@@ -7,9 +7,6 @@ import {
 } from '@mui/material';
 import type { SvgIconProps } from '@mui/material';
 import ChatIcon from '@mui/icons-material/Chat';
-import CameraAltIcon from '@mui/icons-material/CameraAlt';
-import SearchIcon from '@mui/icons-material/Search';
-import WhatsAppIcon from '@mui/icons-material/WhatsApp';
 import HomeIcon from '@mui/icons-material/Home';
 
 import WifiOffIcon from '@mui/icons-material/WifiOff';
@@ -28,11 +25,7 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
   { path: '/', Icon: HomeIcon, label: 'Hub' },
-  { path: '/ask-rx', Icon: ChatIcon, label: 'AskRX' },
-  { path: '/scanner', Icon: CameraAltIcon, label: 'Scanner' },
-  { path: '/search', Icon: SearchIcon, label: 'Search' },
-
-  { path: '/whatsapp', Icon: WhatsAppIcon, label: 'WhatsApp' },
+  { path: '/ask-rx', Icon: ChatIcon, label: 'Nexus' },
 ];
 
 export default function Navigation() {
