@@ -10,6 +10,8 @@ import {
   CircularProgress,
   Chip,
   Button,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
@@ -506,34 +508,56 @@ export default function AskRXPage() {
             </IconButton>
           </Box>
         )}
-        {/* Language selector — only visible when mic is active or about to be used */}
-        <Box sx={{ display: 'flex', gap: 0.75, mb: 1, flexWrap: 'wrap' }}>
-          {[
-            { code: 'en-US', label: 'EN' },
-            { code: 'fr-FR', label: 'FR' },
-            { code: 'es-ES', label: 'ES' },
-            { code: 'ar', label: 'AR' },
-          ].map((lang) => (
-            <Chip
-              key={lang.code}
-              label={lang.label}
-              size="small"
-              onClick={() => setSpeechLang(lang.code)}
-              sx={{
-                fontSize: '0.65rem',
-                height: 20,
-                cursor: 'pointer',
-                bgcolor: speechLang === lang.code ? 'rgba(192,132,252,0.15)' : 'rgba(255,255,255,0.04)',
-                color: speechLang === lang.code ? '#C084FC' : '#475569',
-                border: `1px solid ${speechLang === lang.code ? 'rgba(192,132,252,0.4)' : 'rgba(255,255,255,0.06)'}`,
-                fontWeight: speechLang === lang.code ? 700 : 400,
-                '&:hover': { bgcolor: 'rgba(192,132,252,0.1)', color: '#C084FC' },
-              }}
-            />
-          ))}
-          <Typography sx={{ fontSize: '0.6rem', color: '#334155', alignSelf: 'center', ml: 0.5 }}>
-            voice language
-          </Typography>
+        {/* Language selector — single dropdown */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+          <MicIcon sx={{ fontSize: 13, color: '#475569' }} />
+          <Typography sx={{ fontSize: '0.6rem', color: '#475569' }}>voice language</Typography>
+          <Select
+            value={speechLang}
+            onChange={(e) => setSpeechLang(e.target.value)}
+            size="small"
+            variant="outlined"
+            sx={{
+              fontSize: '0.7rem',
+              height: 24,
+              color: '#C084FC',
+              bgcolor: 'rgba(192,132,252,0.08)',
+              border: '1px solid rgba(192,132,252,0.25)',
+              borderRadius: '8px',
+              '& .MuiOutlinedInput-notchedOutline': { border: 'none' },
+              '& .MuiSelect-select': { py: 0, px: 1 },
+              '& .MuiSvgIcon-root': { color: '#C084FC', fontSize: 16 },
+            }}
+            MenuProps={{
+              slotProps: {
+                paper: {
+                  sx: {
+                    bgcolor: '#1A2540',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: '10px',
+                    mt: 0.5,
+                    '& .MuiMenuItem-root': {
+                      fontSize: '0.8rem',
+                      color: '#CBD5E1',
+                      py: 0.75,
+                      '&:hover': { bgcolor: 'rgba(192,132,252,0.1)', color: '#E0F2F1' },
+                      '&.Mui-selected': { bgcolor: 'rgba(192,132,252,0.15)', color: '#C084FC', fontWeight: 700 },
+                    },
+                  },
+                },
+              },
+            }}
+          >
+            <MenuItem value="en-US">English</MenuItem>
+            <MenuItem value="fr-FR">French</MenuItem>
+            <MenuItem value="es-ES">Spanish</MenuItem>
+            <MenuItem value="ar">Arabic</MenuItem>
+            <MenuItem value="pt-BR">Portuguese</MenuItem>
+            <MenuItem value="sw">Swahili</MenuItem>
+            <MenuItem value="yo">Yoruba</MenuItem>
+            <MenuItem value="ig">Igbo</MenuItem>
+            <MenuItem value="ha">Hausa</MenuItem>
+          </Select>
         </Box>
 
         <Box sx={{

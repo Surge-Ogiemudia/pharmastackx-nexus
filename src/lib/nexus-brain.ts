@@ -435,7 +435,12 @@ Category:`;
     if (!rawTranscript.trim()) return rawTranscript;
 
     const isEnglish = lang.startsWith('en');
-    const langName = lang === 'fr-FR' ? 'French' : lang === 'es-ES' ? 'Spanish' : lang === 'ar' ? 'Arabic' : 'English';
+    const LANG_NAMES: Record<string, string> = {
+      'fr-FR': 'French', 'es-ES': 'Spanish', 'ar': 'Arabic',
+      'pt-BR': 'Portuguese', 'sw': 'Swahili',
+      'yo': 'Yoruba', 'ig': 'Igbo', 'ha': 'Hausa',
+    };
+    const langName = LANG_NAMES[lang] ?? 'English';
     nexusLogger.emit('INFERENCE', `🎙️ Gemma 4 E2B ${isEnglish ? 'correcting' : `translating from ${langName}`}: "${rawTranscript.substring(0, 50)}"`);
 
     const prompt = isEnglish
