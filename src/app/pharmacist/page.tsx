@@ -397,7 +397,7 @@ export default function PharmacistPage() {
                                 {req.medicines.map((m) => m.name).join(', ')}
                               </Typography>
                               <Typography sx={{ fontSize: '0.7rem', color: '#475569' }}>
-                                {mine?.available ? `₦${mine.price.toLocaleString()} · Available` : 'Not available'} · {timeAgo(mine?.respondedAt ?? req.createdAt)}
+                                {mine?.available ? `${mine.price.toLocaleString()} · Available` : 'Not available'} · {timeAgo(mine?.respondedAt ?? req.createdAt)}
                               </Typography>
                             </Box>
                           </Box>
@@ -438,13 +438,13 @@ export default function PharmacistPage() {
           </Typography>
 
           <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, color: '#94A3B8', letterSpacing: '0.08em', textTransform: 'uppercase', mb: 0.75 }}>
-            Price (₦)
+            Price
           </Typography>
           <TextField
             fullWidth
             size="small"
             type="number"
-            placeholder="e.g. 3500"
+            placeholder="e.g. 25"
             value={responding?.price ?? ''}
             onChange={(e) => setResponding((prev) => prev ? { ...prev, price: e.target.value } : null)}
             sx={{

@@ -45,7 +45,6 @@ export default function PaymentPage() {
 
   const handlePay = async () => {
     setPhase('processing');
-    // Simulate Paystack processing
     await delay(2800);
     setPhase('success');
     // Clear the order after success
@@ -101,7 +100,7 @@ export default function PaymentPage() {
             Complete Order
           </Typography>
           <Typography variant="body2" sx={{ color: '#64748B', fontSize: '0.75rem' }}>
-            Secure payment via Paystack
+            Review and confirm your order
           </Typography>
         </Box>
       </Box>
@@ -180,7 +179,7 @@ export default function PaymentPage() {
                     </Typography>
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography sx={{ fontSize: '0.8rem', color: '#64748B' }}>State</Typography>
+                        <Typography sx={{ fontSize: '0.8rem', color: '#64748B' }}>Location</Typography>
                         <Typography sx={{ fontSize: '0.8rem', color: '#E0F2F1' }}>{userState}</Typography>
                       </Box>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -200,17 +199,17 @@ export default function PaymentPage() {
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                         <Typography sx={{ fontSize: '0.85rem', color: '#94A3B8' }}>Medicines subtotal</Typography>
-                        <Typography sx={{ fontSize: '0.85rem', color: '#E0F2F1' }}>₦{subtotal.toLocaleString()}</Typography>
+                        <Typography sx={{ fontSize: '0.85rem', color: '#E0F2F1' }}>{subtotal.toLocaleString()}</Typography>
                       </Box>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                         <Typography sx={{ fontSize: '0.85rem', color: '#94A3B8' }}>Dispatch fee</Typography>
-                        <Typography sx={{ fontSize: '0.85rem', color: '#E0F2F1' }}>₦{deliveryFee.toLocaleString()}</Typography>
+                        <Typography sx={{ fontSize: '0.85rem', color: '#E0F2F1' }}>{deliveryFee.toLocaleString()}</Typography>
                       </Box>
                       <Divider sx={{ borderColor: 'rgba(255,255,255,0.06)', my: 0.5 }} />
                       <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                         <Typography sx={{ fontSize: '1rem', fontWeight: 700, color: '#E0F2F1' }}>Total</Typography>
                         <Typography sx={{ fontSize: '1.1rem', fontWeight: 700, color: '#00E5A0' }}>
-                          ₦{total.toLocaleString()}
+                          {total.toLocaleString()}
                         </Typography>
                       </Box>
                     </Box>
@@ -232,11 +231,11 @@ export default function PaymentPage() {
                     '&:hover': { bgcolor: '#00C987' },
                   }}
                 >
-                  Pay ₦{total.toLocaleString()} with Paystack
+                  Complete Order — {total.toLocaleString()}
                 </Button>
 
                 <Typography sx={{ textAlign: 'center', fontSize: '0.7rem', color: '#475569' }}>
-                  Secured by Paystack · 256-bit SSL encryption
+                  Secured · 256-bit SSL encryption
                 </Typography>
               </Box>
             </motion.div>
@@ -270,7 +269,7 @@ export default function PaymentPage() {
                     Processing Payment
                   </Typography>
                   <Typography variant="body2" sx={{ color: '#64748B', mt: 0.5 }}>
-                    Connecting to Paystack...
+                    Processing payment...
                   </Typography>
                 </Box>
               </Box>
@@ -330,7 +329,7 @@ export default function PaymentPage() {
                       </Box>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                         <Typography sx={{ fontSize: '0.8rem', color: '#64748B' }}>Amount paid</Typography>
-                        <Typography sx={{ fontSize: '0.8rem', fontWeight: 700, color: '#00E5A0' }}>₦{total.toLocaleString()}</Typography>
+                        <Typography sx={{ fontSize: '0.8rem', fontWeight: 700, color: '#00E5A0' }}>{total.toLocaleString()}</Typography>
                       </Box>
                     </Box>
                   </CardContent>
