@@ -489,7 +489,9 @@ Category:`;
     if (!validation.passed) {
       logFailure({ feature: 'askrx', patterns: validation.patterns, trigger: message, bad_output_sample: clean, auto_detected: true });
 
-      const isCritical = validation.patterns.includes('thinking_leak') || validation.patterns.includes('double_response');
+      // Only retry on thinking_leak still present after stripping.
+      // double_response is already fixed by deduplicateResponse; excessive_length is non-critical.
+      const isCritical = validation.patterns.includes('thinking_leak');
       if (isCritical) {
         nexusLogger.emit('SYSTEM', `🛡️ Safety: ${validation.patterns.join(' + ')} detected — retrying...`);
         try {
@@ -837,34 +839,58 @@ function stripSystemLeaks(text: string): string {
 
 // Strips chain-of-thought leakage from gemma-4-26b-a4b-it reasoning output.
 // The model outputs: [clean answer] then [*Wait,...* / *Let's...* reasoning] then repeats.
-// Asterisks NEVER appear in clean pharmacist responses, so ANY * signals reasoning.
 function stripThinking(text: string): string {
-  // Strategy 1 (primary): Any asterisk in the text means reasoning leaked.
-  // The answer always comes before the first asterisk — grab it, trimmed to last full sentence.
-  const firstAsterisk = text.indexOf('*');
-  if (firstAsterisk > 30) {
-    const beforeAsterisk = text.substring(0, firstAsterisk).trim();
-    const lastPunct = Math.max(
-      beforeAsterisk.lastIndexOf('.'),
-      beforeAsterisk.lastIndexOf('!'),
-      beforeAsterisk.lastIndexOf('?')
-    );
-    if (lastPunct > 20) return beforeAsterisk.substring(0, lastPunct + 1).trim();
-    if (beforeAsterisk.length > 20) return beforeAsterisk;
+  // Phase 1: Inline asterisk reasoning — e.g. "...answer.   *Wait, the prompt says..."
+  // Asterisks NEVER appear in clean pharmacist responses, so any *ThinkingWord is a signal.
+  const inlineThink = /\*(?:Wait|Final|Let me|Actually|I'll|The prompt|Hmm|Note that|Re-read|Check)/i;
+  const inlineIdx = text.search(inlineThink);
+  if (inlineIdx > 30) {
+    const before = text.substring(0, inlineIdx).trim();
+    const lastPunct = Math.max(before.lastIndexOf('.'), before.lastIndexOf('!'), before.lastIndexOf('?'));
+    if (lastPunct > 20) return before.substring(0, lastPunct + 1).trim();
+    if (before.length > 20) return before;
   }
 
-  // Strategy 2: Self-evaluation blocks — numbered lists, "Total sentences:", "Wait, ..."
-  const selfEvalIdx = text.search(/(?:\d+\.\s+){2,}|\bTotal sentences:|\bStarts immediately:|\bNo disclaimers:|\bWait,?\s+/i);
-  if (selfEvalIdx > 30) {
-    const beforeEval = text.substring(0, selfEvalIdx).trim();
-    if (beforeEval.length > 20) return beforeEval;
+  // Phase 2: Lines starting with * (model put thinking on its own line)
+  const lines = text.split('\n');
+  const firstThinkLine = lines.findIndex((l) => /^\s*\*/.test(l));
+  if (firstThinkLine > 0) {
+    const before = lines.slice(0, firstThinkLine).join('\n').trim();
+    if (before.length > 20) return before;
   }
 
-  // Strategy 3: Non-asterisked "Final Polish:", "Final Answer:" labels
-  const noAsteriskFinal = text.match(/(?:^|\n)\s*Final\s+(?:Polish|Answer|Version|Response|selection)\s*:?\s*\n?\s*([\s\S]{20,})/i);
-  if (noAsteriskFinal) return noAsteriskFinal[1].trim();
+  // Phase 3: If the model started with *...* blocks, strip them all and return remaining content
+  if (/^\s*\*/m.test(text)) {
+    const withoutBlocks = text
+      .replace(/\*[^*\n]{0,300}\*/g, '')
+      .replace(/^\s*\*.*$/gm, '')
+      .trim();
+    const sentences = withoutBlocks.split(/(?<=[.!?])\s+/).filter((s) => s.trim().length > 15);
+    if (sentences.length > 0) return sentences.slice(0, 3).join(' ').trim();
+  }
 
-  // Strategy 4: last clean paragraph with no asterisks or reasoning markers
+  // Phase 4: Non-asterisk self-evaluation markers (numbered checklists, "Total sentences:", "Wait, I...")
+  const selfEvalMarkers: RegExp[] = [
+    /\s{2,}Wait,?\s+(?:actually|the prompt|let me|i'll|i should|but)\b/i,
+    /\bTotal sentences:/i,
+    /\bStarts immediately:/i,
+    /(?:\d+\.\s+){2,}/,
+  ];
+  for (const marker of selfEvalMarkers) {
+    const idx = text.search(marker);
+    if (idx > 30) {
+      const before = text.substring(0, idx).trim();
+      const lastPunct = Math.max(before.lastIndexOf('.'), before.lastIndexOf('!'), before.lastIndexOf('?'));
+      if (lastPunct > 20) return before.substring(0, lastPunct + 1).trim();
+      if (before.length > 20) return before;
+    }
+  }
+
+  // Phase 5: Non-asterisked "Final Answer:" labels
+  const finalMatch = text.match(/(?:^|\n)\s*Final\s+(?:Polish|Answer|Version|Response|selection)\s*:?\s*\n?\s*([\s\S]{20,})/i);
+  if (finalMatch) return finalMatch[1].trim();
+
+  // Phase 6: last clean paragraph
   const paragraphs = text.split(/\n{2,}/);
   for (let i = paragraphs.length - 1; i >= 0; i--) {
     const p = paragraphs[i].trim();

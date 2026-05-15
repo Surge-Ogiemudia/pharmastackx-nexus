@@ -109,8 +109,10 @@ function detectDoubleResponse(text: string): boolean {
 
 function detectThinkingLeak(text: string): boolean {
   return (
-    // Asterisks never appear in clean pharmacist responses — any * signals reasoning
-    text.includes('*') ||
+    // Inline asterisk thinking: *Wait, *Final, *Let me, etc. — never in clean responses
+    /\*(?:Wait|Final|Let me|Actually|I'll|The prompt|Hmm|Note that)/i.test(text) ||
+    // Line starting with asterisk = reasoning block
+    /^\s*\*/m.test(text) ||
     /<think>/i.test(text) ||
     /\blet me (think|reconsider|analyze|check|verify|rephrase|approach)\b/i.test(text) ||
     /\bi need to consider\b/i.test(text) ||
@@ -121,7 +123,8 @@ function detectThinkingLeak(text: string): boolean {
     /\bstarts immediately:/i.test(text) ||
     /\bno disclaimers:/i.test(text) ||
     /\bno greetings:/i.test(text) ||
-    /\bwait,?\s+/i.test(text) ||
+    // "Wait," followed by clear reasoning context (not "wait time" / "wait until")
+    /\bwait,?\s+(?:actually|the prompt|let me|i'll|i should|but i)\b/i.test(text) ||
     /(?:\d+\.\s+){2,}[A-Z]/.test(text)
   );
 }
