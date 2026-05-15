@@ -45,9 +45,12 @@ async function tryGemma4(generateFn: () => Promise<string>, maxAttempts = 3): Pr
       nexusLogger.emit('ERROR', `☁️ Cloud error (attempt ${attempt}): ${msg.substring(0, 400)}`);
       const isRateLimit = /\[429]/.test(msg);
       const isServerError = /\[5\d\d]/.test(msg);
-      if ((!isRateLimit && !isServerError) || attempt === maxAttempts) return null;
-      const delay = isRateLimit ? 2000 * attempt : 800;
-      nexusLogger.emit('SYSTEM', `⚠️ Gemma 4 ${isRateLimit ? 'rate limited' : 'server error'} — retrying in ${delay / 1000}s (${attempt}/${maxAttempts})...`);
+      // "Load failed" (Safari) / "Failed to fetch" (Chrome) are transient network errors
+      const isNetworkError = /load failed|failed to fetch|network/i.test(msg) && !/\[\d{3}]/.test(msg);
+      const isRetryable = isRateLimit || isServerError || isNetworkError;
+      if (!isRetryable || attempt === maxAttempts) return null;
+      const delay = isRateLimit ? 2000 * attempt : 1000;
+      nexusLogger.emit('SYSTEM', `⚠️ Gemma 4 ${isRateLimit ? 'rate limited' : isNetworkError ? 'network error' : 'server error'} — retrying in ${delay / 1000}s (${attempt}/${maxAttempts})...`);
       await new Promise((r) => setTimeout(r, delay));
     }
   }

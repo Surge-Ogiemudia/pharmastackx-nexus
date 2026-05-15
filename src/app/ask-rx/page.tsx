@@ -46,6 +46,8 @@ interface Message {
   originalQuery?: string;
   pendingMedicines?: Medicine[];
   suggestedAction?: SuggestedAction;
+  isError?: boolean;
+  failedQuery?: string;
 }
 
 const SUGGESTED = [
@@ -324,8 +326,13 @@ export default function NexusPage() {
         patternsDetected: consultResult.patternsDetected,
         suggestedAction,
       });
-    } catch (err) {
-      addMsg({ role: 'ai', text: err instanceof Error ? err.message : 'Unknown error' });
+    } catch {
+      addMsg({
+        role: 'ai',
+        text: 'Connection dropped — Gemma couldn\'t be reached. Tap Retry to try again.',
+        isError: true,
+        failedQuery: messageText,
+      });
     } finally {
       setLoading(false);
     }
@@ -411,7 +418,7 @@ export default function NexusPage() {
                   <Typography sx={{ fontSize: '0.75rem', color: '#00E5A0', fontStyle: 'italic' }}>{msg.text}</Typography>
                 </Box>
               ) : (
-                <MessageBubble msg={msg} onSuggestedAction={handleSuggestedAction} />
+                <MessageBubble msg={msg} onSuggestedAction={handleSuggestedAction} onRetry={sendMessage} />
               )}
             </motion.div>
           ))}
@@ -904,7 +911,7 @@ const FEEDBACK_OPTIONS: { pattern: FailurePattern; label: string }[] = [
   { pattern: 'excessive_length', label: 'Too long' },
 ];
 
-function MessageBubble({ msg, onSuggestedAction }: { msg: Message; onSuggestedAction?: (a: SuggestedAction) => void }) {
+function MessageBubble({ msg, onSuggestedAction, onRetry }: { msg: Message; onSuggestedAction?: (a: SuggestedAction) => void; onRetry?: (query: string) => void }) {
   const isUser = msg.role === 'user';
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [selectedPattern, setSelectedPattern] = useState<FailurePattern | null>(null);
@@ -928,11 +935,23 @@ function MessageBubble({ msg, onSuggestedAction }: { msg: Message; onSuggestedAc
         <Box sx={{
           px: 2, py: 1.5,
           borderRadius: isUser ? '16px 4px 16px 16px' : '4px 16px 16px 16px',
-          bgcolor: isUser ? 'rgba(96,165,250,0.1)' : 'rgba(255,255,255,0.04)',
-          border: `1px solid ${isUser ? 'rgba(96,165,250,0.15)' : msg.flagged ? 'rgba(251,191,36,0.25)' : 'rgba(255,255,255,0.06)'}`,
+          bgcolor: isUser ? 'rgba(96,165,250,0.1)' : msg.isError ? 'rgba(239,68,68,0.05)' : 'rgba(255,255,255,0.04)',
+          border: `1px solid ${isUser ? 'rgba(96,165,250,0.15)' : msg.isError ? 'rgba(239,68,68,0.2)' : msg.flagged ? 'rgba(251,191,36,0.25)' : 'rgba(255,255,255,0.06)'}`,
         }}>
           {msg.imagePreview && <Box component="img" src={msg.imagePreview} alt="Attached" sx={{ maxWidth: '100%', maxHeight: 200, borderRadius: '8px', display: 'block', mb: msg.text ? 1 : 0 }} />}
-          <Typography variant="body2" sx={{ color: '#E0F2F1', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{msg.text}</Typography>
+          <Typography variant="body2" sx={{ color: msg.isError ? '#FCA5A5' : '#E0F2F1', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{msg.text}</Typography>
+          {msg.isError && msg.failedQuery && onRetry && (
+            <Box
+              onClick={() => onRetry(msg.failedQuery!)}
+              sx={{
+                mt: 1, px: 1.25, py: 0.7, borderRadius: '7px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 0.75,
+                border: '1px solid rgba(239,68,68,0.35)', bgcolor: 'rgba(239,68,68,0.08)',
+                '&:hover': { bgcolor: 'rgba(239,68,68,0.14)', borderColor: 'rgba(239,68,68,0.5)' }, transition: 'all 0.15s',
+              }}
+            >
+              <Typography sx={{ fontSize: '0.78rem', fontWeight: 600, color: '#FCA5A5' }}>↺ Retry</Typography>
+            </Box>
+          )}
           {msg.suggestedAction && !isUser && (
             <Box
               onClick={() => {
