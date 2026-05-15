@@ -109,7 +109,8 @@ function detectDoubleResponse(text: string): boolean {
 
 function detectThinkingLeak(text: string): boolean {
   return (
-    /^\s*\*/m.test(text) ||
+    // Asterisks never appear in clean pharmacist responses — any * signals reasoning
+    text.includes('*') ||
     /<think>/i.test(text) ||
     /\blet me (think|reconsider|analyze|check|verify|rephrase|approach)\b/i.test(text) ||
     /\bi need to consider\b/i.test(text) ||
@@ -120,7 +121,7 @@ function detectThinkingLeak(text: string): boolean {
     /\bstarts immediately:/i.test(text) ||
     /\bno disclaimers:/i.test(text) ||
     /\bno greetings:/i.test(text) ||
-    /\bwait,?\s+(the user|i should|actually)/i.test(text) ||
+    /\bwait,?\s+/i.test(text) ||
     /(?:\d+\.\s+){2,}[A-Z]/.test(text)
   );
 }

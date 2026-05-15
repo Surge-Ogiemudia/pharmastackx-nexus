@@ -408,14 +408,17 @@ Category:`;
           const retryClean = stripSystemLeaks(stripThinking(retryResponse));
           if (retryClean.length >= 5) {
             const retryValidation = validateResponse(retryClean, 'askrx');
-            logCorrectionResult(retryValidation.passed, 'askrx', validation.patterns);
-            nexusLogger.emit('SYSTEM', `🛡️ Self-correction ${retryValidation.passed ? 'successful ✓' : 'partial — response flagged'}`);
-            return {
-              text: retryClean,
-              flagged: !retryValidation.passed,
-              patternsDetected: validation.patterns,
-              corrected: true,
-            };
+            // Only use retry if thinking_leak is resolved — otherwise fall back to original
+            if (!retryValidation.patterns.includes('thinking_leak')) {
+              logCorrectionResult(retryValidation.passed, 'askrx', validation.patterns);
+              nexusLogger.emit('SYSTEM', `🛡️ Self-correction ${retryValidation.passed ? 'successful ✓' : 'partial — response flagged'}`);
+              return {
+                text: retryClean,
+                flagged: !retryValidation.passed,
+                patternsDetected: validation.patterns,
+                corrected: true,
+              };
+            }
           }
         } catch {
           // Retry failed — fall through to flagged response
@@ -498,8 +501,11 @@ Category:`;
           const retryClean = stripSystemLeaks(stripThinking(retryResponse));
           if (retryClean.length >= 5) {
             const retryValidation = validateResponse(retryClean, 'askrx');
-            logCorrectionResult(retryValidation.passed, 'askrx', validation.patterns);
-            return { text: retryClean, flagged: !retryValidation.passed, patternsDetected: validation.patterns, corrected: true };
+            // Only use retry if it resolved the thinking leak — otherwise fall back to original
+            if (!retryValidation.patterns.includes('thinking_leak')) {
+              logCorrectionResult(retryValidation.passed, 'askrx', validation.patterns);
+              return { text: retryClean, flagged: !retryValidation.passed, patternsDetected: validation.patterns, corrected: true };
+            }
           }
         } catch { /* fall through */ }
         logCorrectionResult(false, 'askrx', validation.patterns);
@@ -830,39 +836,35 @@ function stripSystemLeaks(text: string): string {
 }
 
 // Strips chain-of-thought leakage from gemma-4-26b-a4b-it reasoning output.
-// The model outputs: [clean answer] then [*Wait,...* / *Let's...* reasoning] then repeats the answer.
-// Strategy: grab everything before the first asterisk-wrapped reasoning line.
+// The model outputs: [clean answer] then [*Wait,...* / *Let's...* reasoning] then repeats.
+// Asterisks NEVER appear in clean pharmacist responses, so ANY * signals reasoning.
 function stripThinking(text: string): string {
-  // Strategy 0a: strip self-evaluation blocks — Gemma verifying its own rule compliance.
-  // e.g. "...region. 1. 2. 3. Total sentences: 3. Starts immediately: Yes. Wait, the user..."
-  const selfEvalIdx = text.search(/(?:\d+\.\s+){2,}|\bTotal sentences:|\bStarts immediately:|\bNo disclaimers:|\bWait,?\s+the user/i);
+  // Strategy 1 (primary): Any asterisk in the text means reasoning leaked.
+  // The answer always comes before the first asterisk — grab it, trimmed to last full sentence.
+  const firstAsterisk = text.indexOf('*');
+  if (firstAsterisk > 30) {
+    const beforeAsterisk = text.substring(0, firstAsterisk).trim();
+    const lastPunct = Math.max(
+      beforeAsterisk.lastIndexOf('.'),
+      beforeAsterisk.lastIndexOf('!'),
+      beforeAsterisk.lastIndexOf('?')
+    );
+    if (lastPunct > 20) return beforeAsterisk.substring(0, lastPunct + 1).trim();
+    if (beforeAsterisk.length > 20) return beforeAsterisk;
+  }
+
+  // Strategy 2: Self-evaluation blocks — numbered lists, "Total sentences:", "Wait, ..."
+  const selfEvalIdx = text.search(/(?:\d+\.\s+){2,}|\bTotal sentences:|\bStarts immediately:|\bNo disclaimers:|\bWait,?\s+/i);
   if (selfEvalIdx > 30) {
     const beforeEval = text.substring(0, selfEvalIdx).trim();
     if (beforeEval.length > 20) return beforeEval;
   }
 
-  // Strategy 0b: handle non-asterisked "Final Polish:", "Final Answer:" etc. labels
-  // Model sometimes outputs these as plain text headers without asterisk wrapping
+  // Strategy 3: Non-asterisked "Final Polish:", "Final Answer:" labels
   const noAsteriskFinal = text.match(/(?:^|\n)\s*Final\s+(?:Polish|Answer|Version|Response|selection)\s*:?\s*\n?\s*([\s\S]{20,})/i);
   if (noAsteriskFinal) return noAsteriskFinal[1].trim();
 
-  // Fast path — no asterisk-wrapped lines at all
-  if (!/^\s*\*/m.test(text)) return text.trim();
-
-  const lines = text.split('\n');
-
-  // Strategy 1: take everything before the first *reasoning* line (e.g. "*Wait," "*Let's", "*Final")
-  const firstThinkIdx = lines.findIndex((l) => /^\s*\*/.test(l));
-  if (firstThinkIdx > 0) {
-    const before = lines.slice(0, firstThinkIdx).join('\n').trim();
-    if (before.length > 20) return before;
-  }
-
-  // Strategy 2: content after the last "Final Version:" / "Final selection:" / "Final Polish:" block
-  const finalMatch = text.match(/\*\s*Final\s+(?:Version|selection|Polish)\s*:?\*?\s*([\s\S]+?)(?=\n\s*\*|$)/i);
-  if ((finalMatch?.[1]?.trim().length ?? 0) > 20) return finalMatch![1].trim();
-
-  // Strategy 3: last clean paragraph with no asterisks
+  // Strategy 4: last clean paragraph with no asterisks or reasoning markers
   const paragraphs = text.split(/\n{2,}/);
   for (let i = paragraphs.length - 1; i >= 0; i--) {
     const p = paragraphs[i].trim();

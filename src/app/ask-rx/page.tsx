@@ -73,24 +73,26 @@ function extractMedicinesFromResponse(text: string): Medicine[] {
 
   const add = (name: string, strength: string | null) => {
     const key = name.toLowerCase();
-    if (!seen.has(key) && !SKIP_WORDS.has(name) && name.length >= 4) {
+    const firstWord = name.split(/\s+/)[0];
+    if (!seen.has(key) && !SKIP_WORDS.has(name) && !SKIP_WORDS.has(firstWord) && name.length >= 4) {
       seen.add(key);
       result.push({ name, strength: strength ?? '', form: '', quantity: 0 });
     }
   };
 
   // Pattern 1: DrugName (optional Brand in parens) dose — e.g. "Budesonide (Pulmicort) 200mcg"
-  const withDose = /\b([A-Z][a-z]{3,}(?:[- ][A-Za-z]{3,})?)\s*(?:\([A-Za-z\s]{2,20}\)\s*)?([\d.]+\s*(?:mg|mcg|g|ml|iu|units?)(?:\/[\d.]*(?:ml|mg|g))?)/g;
+  // The optional " GenericName" suffix is dropped to prevent "Take Amlodipine" compounds.
+  const withDose = /\b([A-Z][a-z]{3,})\s*(?:\([A-Za-z\s]{2,20}\)\s*)?([\d.]+\s*(?:mg|mcg|g|ml|iu|units?)(?:\/[\d.]*(?:ml|mg|g))?)/g;
   let m: RegExpExecArray | null;
   while ((m = withDose.exec(text)) !== null) {
     add(m[1].trim(), m[2].replace(/\s+/g, '').trim());
   }
 
-  // Pattern 2: Generic (Brand) or Brand (Generic) pairs — e.g. "Salbutamol (Ventolin)"
+  // Pattern 2: Generic (Brand) pairs — e.g. "Salbutamol (Ventolin)".
+  // Only add the generic name; the brand is an alias for the same drug, not a separate one.
   const brandPair = /\b([A-Z][a-z]{3,})\s+\(([A-Z][a-z]{3,})\)/g;
   while ((m = brandPair.exec(text)) !== null) {
     add(m[1], null);
-    add(m[2], null);
   }
 
   return result.slice(0, 4);
