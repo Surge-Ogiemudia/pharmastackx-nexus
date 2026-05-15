@@ -38,20 +38,25 @@ export async function POST(req: NextRequest) {
 
     const model = genAI.getGenerativeModel({
       model: 'gemma-4-26b-a4b-it',
-      generationConfig: { temperature: 0.1, maxOutputTokens: 300 },
+      generationConfig: { temperature: 0.1, maxOutputTokens: 512 },
     });
 
     const result = await model.generateContent(
       `${EXTRACT_PROMPT}\n\nPatient query: "${query}"`
     );
     const raw = result.response.text().trim();
+    console.log('[extract-medicines] raw:', raw.substring(0, 200));
 
-    // Strip markdown code fences if present
-    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-    const medicines = JSON.parse(cleaned);
+    // Find the first JSON array anywhere in the response
+    const arrayMatch = raw.match(/\[[\s\S]*?\]/);
+    if (!arrayMatch) {
+      console.error('[extract-medicines] no JSON array found in:', raw);
+      return NextResponse.json({ medicines: [] });
+    }
 
+    const medicines = JSON.parse(arrayMatch[0]);
     if (!Array.isArray(medicines) || medicines.length === 0) {
-      throw new Error('No medicines extracted');
+      return NextResponse.json({ medicines: [] });
     }
 
     return NextResponse.json({ medicines });
