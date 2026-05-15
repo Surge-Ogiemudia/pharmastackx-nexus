@@ -57,6 +57,12 @@ const SUGGESTED = [
 ];
 
 
+// Pure health questions don't need classify-intent — saves an API round-trip
+function isObviousConsultation(text: string): boolean {
+  return /^(what\s|how\s|why\s|is\s|are\s|can\s|should\s|tell\s|explain\s|does\s|when\s|where\s|will\s)/i.test(text.trim())
+    || /\b(side effect|adverse|interact|overdose|safe during|how long|difference between|versus|\bvs\b|mechanism|contraindicated)\b/i.test(text);
+}
+
 export default function NexusPage() {
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -260,34 +266,44 @@ export default function NexusPage() {
       return;
     }
 
-    // Text path: classify intent and consult Gemma simultaneously, then confirm with user
+    // Text path: classify intent (sequential to avoid rate limits), then consult
     setLoading(true);
     try {
-      const ctx = messages.filter((m) => m.role === 'user' || m.role === 'ai').slice(-4)
-        .map((m) => ({ role: m.role, text: m.text }));
       const consultHistory = messages.filter((m) => m.role === 'user' || m.role === 'ai').slice(-6)
         .map((m) => ({ role: m.role === 'user' ? 'user' : 'model', text: m.text }));
 
-      const [classifyData, consultResult] = await Promise.all([
-        fetch('/api/classify-intent', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: messageText, history: ctx }),
-        }).then((r) => r.ok ? r.json() : null).catch(() => null),
-        brain.consult(messageText, consultHistory),
-      ]);
+      // Skip classify-intent for obvious health questions — saves an API call and avoids rate limits.
+      // Only classify when the message is ambiguous (could be find or condition or scan).
+      const needsClassify = !isObviousConsultation(messageText);
+
+      let classifyData: { intent: string; medicines?: Medicine[]; condition?: string | null; suggestedMedicines?: Medicine[] } | null = null;
+      if (needsClassify) {
+        try {
+          const ctx = messages.filter((m) => m.role === 'user' || m.role === 'ai').slice(-4)
+            .map((m) => ({ role: m.role, text: m.text }));
+          const r = await fetch('/api/classify-intent', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: messageText, history: ctx }),
+          });
+          if (r.ok) classifyData = await r.json();
+        } catch { /* fall through to pure consultation */ }
+      }
 
       const intent: string = classifyData?.intent ?? 'consultation';
 
-      // Scan: skip consultation, just prompt camera
+      // Scan: no consultation needed
       if (intent === 'scan') {
         addMsg({ role: 'ai', text: 'Tap the camera icon below to scan your prescription or medicine.' });
         return;
       }
 
-      // Attach a confirmation action button — Gemma never acts without user tap
+      // Always consult Gemma for the conversational answer (sequential after classify)
+      const consultResult = await brain.consult(messageText, consultHistory);
+
+      // Attach a confirmation action button — user must tap before anything is dispatched
       let suggestedAction: SuggestedAction | undefined;
-      if (intent === 'find_medicine' && classifyData?.medicines?.length > 0) {
+      if (intent === 'find_medicine' && classifyData?.medicines?.length) {
         suggestedAction = { type: 'find_medicine', medicines: classifyData.medicines };
       } else if (intent === 'condition_search') {
         if (!classifyData?.suggestedMedicines?.length) {

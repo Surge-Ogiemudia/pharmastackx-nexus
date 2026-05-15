@@ -36,17 +36,19 @@ async function postInfer(url: string, body: object): Promise<string> {
   return data.text;
 }
 
-async function tryGemma4(generateFn: () => Promise<string>, maxAttempts = 2): Promise<string | null> {
+async function tryGemma4(generateFn: () => Promise<string>, maxAttempts = 3): Promise<string | null> {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       return await withTimeout(generateFn(), GEMMA_TIMEOUT_MS);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       nexusLogger.emit('ERROR', `☁️ Cloud error (attempt ${attempt}): ${msg.substring(0, 400)}`);
-      const isRetryable = /\[5\d\d]/.test(msg);
-      if (!isRetryable || attempt === maxAttempts) return null;
-      nexusLogger.emit('SYSTEM', `⚠️ Gemma 4 server error — retrying (${attempt}/${maxAttempts})...`);
-      await new Promise((r) => setTimeout(r, 800));
+      const isRateLimit = /\[429]/.test(msg);
+      const isServerError = /\[5\d\d]/.test(msg);
+      if ((!isRateLimit && !isServerError) || attempt === maxAttempts) return null;
+      const delay = isRateLimit ? 2000 * attempt : 800;
+      nexusLogger.emit('SYSTEM', `⚠️ Gemma 4 ${isRateLimit ? 'rate limited' : 'server error'} — retrying in ${delay / 1000}s (${attempt}/${maxAttempts})...`);
+      await new Promise((r) => setTimeout(r, delay));
     }
   }
   return null;
