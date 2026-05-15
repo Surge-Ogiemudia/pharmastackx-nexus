@@ -14,7 +14,10 @@ export async function POST(req: NextRequest) {
 
     const model = genAI.getGenerativeModel({
       model: 'gemma-4-26b-a4b-it',
-      systemInstruction: 'You are a medicine extraction AI. Output ONLY a JSON array of medicines from the patient request. No explanation. No markdown. Just the JSON array.',
+      systemInstruction:
+        'You are a medicine extraction AI. Output ONLY a JSON array of medicine objects with fields: name, strength, form, quantity. ' +
+        'Example: [{"name":"Amoxicillin","strength":"500mg","form":"Capsule","quantity":null}]. ' +
+        'Use null for unknown fields. No explanation. No markdown. Just the JSON array.',
       generationConfig: { temperature: 0.1, maxOutputTokens: 256 },
     });
 
@@ -32,8 +35,23 @@ JSON array of medicines needed:`;
       return NextResponse.json({ medicines: [] });
     }
 
-    const medicines = JSON.parse(arrayMatch[0]);
-    return NextResponse.json({ medicines: Array.isArray(medicines) ? medicines : [] });
+    const parsed = JSON.parse(arrayMatch[0]);
+    if (!Array.isArray(parsed)) return NextResponse.json({ medicines: [] });
+
+    // Normalize: handle both string entries and object entries
+    const medicines = parsed
+      .map((m: unknown) => {
+        if (typeof m === 'string' && m.trim()) {
+          return { name: m.trim(), strength: null, form: null, quantity: null };
+        }
+        if (typeof m === 'object' && m !== null && 'name' in m) {
+          return m;
+        }
+        return null;
+      })
+      .filter(Boolean);
+
+    return NextResponse.json({ medicines });
   } catch (err) {
     console.error('[extract-medicines]', err);
     return NextResponse.json({ medicines: [] });
