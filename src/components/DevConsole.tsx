@@ -29,6 +29,7 @@ const PATTERN_LABELS: Record<FailurePattern, string> = {
   preamble: 'Preamble',
   disclaimer: 'Disclaimer',
   hallucination: 'Hallucination',
+  wrong_routing: 'Bad Route',
 };
 
 const SAFETY_EVENT_COLORS: Record<SafetyEvent['type'], string> = {
