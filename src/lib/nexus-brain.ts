@@ -752,7 +752,15 @@ function stripSystemLeaks(text: string): string {
 // The model outputs: [clean answer] then [*Wait,...* / *Let's...* reasoning] then repeats the answer.
 // Strategy: grab everything before the first asterisk-wrapped reasoning line.
 function stripThinking(text: string): string {
-  // Strategy 0: handle non-asterisked "Final Polish:", "Final Answer:" etc. labels
+  // Strategy 0a: strip self-evaluation blocks — Gemma verifying its own rule compliance.
+  // e.g. "...region. 1. 2. 3. Total sentences: 3. Starts immediately: Yes. Wait, the user..."
+  const selfEvalIdx = text.search(/(?:\d+\.\s+){2,}|\bTotal sentences:|\bStarts immediately:|\bNo disclaimers:|\bWait,?\s+the user/i);
+  if (selfEvalIdx > 30) {
+    const beforeEval = text.substring(0, selfEvalIdx).trim();
+    if (beforeEval.length > 20) return beforeEval;
+  }
+
+  // Strategy 0b: handle non-asterisked "Final Polish:", "Final Answer:" etc. labels
   // Model sometimes outputs these as plain text headers without asterisk wrapping
   const noAsteriskFinal = text.match(/(?:^|\n)\s*Final\s+(?:Polish|Answer|Version|Response|selection)\s*:?\s*\n?\s*([\s\S]{20,})/i);
   if (noAsteriskFinal) return noAsteriskFinal[1].trim();

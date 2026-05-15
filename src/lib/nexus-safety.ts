@@ -114,7 +114,14 @@ function detectThinkingLeak(text: string): boolean {
     /\blet me (think|reconsider|analyze|check|verify|rephrase|approach)\b/i.test(text) ||
     /\bi need to consider\b/i.test(text) ||
     /^step \d+:/im.test(text) ||
-    /\bfirst,? let'?s\b/i.test(text)
+    /\bfirst,? let'?s\b/i.test(text) ||
+    // Self-evaluation: Gemma verifying its own compliance mid-response
+    /\btotal sentences:/i.test(text) ||
+    /\bstarts immediately:/i.test(text) ||
+    /\bno disclaimers:/i.test(text) ||
+    /\bno greetings:/i.test(text) ||
+    /\bwait,?\s+(the user|i should|actually)/i.test(text) ||
+    /(?:\d+\.\s+){2,}[A-Z]/.test(text)
   );
 }
 

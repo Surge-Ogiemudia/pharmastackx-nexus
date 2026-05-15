@@ -59,10 +59,13 @@ const SUGGESTED = [
 ];
 
 
-// Pure health questions don't need classify-intent — saves an API round-trip
+// Pure health questions don't need classify-intent — saves an API round-trip.
+// "Where can I find/get/buy X" is NOT a consultation — exclude those so classify-intent runs.
 function isObviousConsultation(text: string): boolean {
-  return /^(what\s|how\s|why\s|is\s|are\s|can\s|should\s|tell\s|explain\s|does\s|when\s|where\s|will\s)/i.test(text.trim())
-    || /\b(side effect|adverse|interact|overdose|safe during|how long|difference between|versus|\bvs\b|mechanism|contraindicated)\b/i.test(text);
+  const t = text.trim();
+  if (/^where\b/i.test(t) && /\b(find|get|buy|purchase|locate|pharmacist|stock|available|near)\b/i.test(t)) return false;
+  return /^(what\s|how\s|why\s|is\s|are\s|can\s|should\s|tell\s|explain\s|does\s|when\s|where\s|will\s)/i.test(t)
+    || /\b(side effect|adverse|interact|overdose|safe during|how long|difference between|versus|\bvs\b|mechanism|contraindicated)\b/i.test(t);
 }
 
 export default function NexusPage() {

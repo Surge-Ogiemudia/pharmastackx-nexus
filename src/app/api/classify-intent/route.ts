@@ -21,19 +21,24 @@ Classify the user message into exactly one intent:
 - "scan": user wants to photograph or scan a prescription, pill, or medicine pack
 
 CRITICAL RULE — find_medicine triggers on ANY of these patterns, regardless of prior conversation:
-"I want [drug name]", "I need [drug name]", "get me [drug name]", "find [drug name]", "I want one [of those]", "I need one [of those]", "get me one"
+"I want [drug name]", "I need [drug name]", "get me [drug name]", "find [drug name]", "I want one", "I need one", "get me one", "find a pharmacist", "who has it", "where can I find/get/buy"
+
+PRONOUN RESOLUTION — when the message uses "it", "one", "this", "that" without naming a medicine,
+resolve the medicine from the conversation history. If a specific drug was just discussed, use it.
 
 Output ONLY valid JSON with all four fields. No explanation. No markdown.
 Format: {"intent":"consultation","medicines":[],"condition":null,"suggestedMedicines":[]}
 
 Rules:
-- find_medicine: fill medicines[] with [{name, strength, form, quantity}], use null for unknown fields
+- find_medicine: fill medicines[] with [{name, strength, form, quantity}], use null for unknown fields. Resolve pronouns from history.
 - condition_search: set condition to a concise name, fill suggestedMedicines[] with 2-4 first-line options
 - consultation / scan: leave all other fields empty/null
 
 Examples:
 "I want flixotide" → {"intent":"find_medicine","medicines":[{"name":"Flixotide","strength":null,"form":null,"quantity":null}],"condition":null,"suggestedMedicines":[]}
-"I need one now" (after discussing Flixotide) → {"intent":"find_medicine","medicines":[{"name":"Flixotide","strength":null,"form":null,"quantity":null}],"condition":null,"suggestedMedicines":[]}
+"I need one now" (after discussing Pulmicort) → {"intent":"find_medicine","medicines":[{"name":"Pulmicort","strength":null,"form":null,"quantity":null}],"condition":null,"suggestedMedicines":[]}
+"Find a pharmacist for me that has it" (after discussing Pulmicort) → {"intent":"find_medicine","medicines":[{"name":"Pulmicort","strength":null,"form":null,"quantity":null}],"condition":null,"suggestedMedicines":[]}
+"Where can I find pulmicort" → {"intent":"find_medicine","medicines":[{"name":"Pulmicort","strength":null,"form":null,"quantity":null}],"condition":null,"suggestedMedicines":[]}
 "I need coartem" → {"intent":"find_medicine","medicines":[{"name":"Coartem","strength":null,"form":null,"quantity":null}],"condition":null,"suggestedMedicines":[]}
 "I need something for high BP" → {"intent":"condition_search","medicines":[],"condition":"high blood pressure","suggestedMedicines":[{"name":"Amlodipine","strength":"5mg","form":"Tablet","quantity":null},{"name":"Lisinopril","strength":"10mg","form":"Tablet","quantity":null}]}
 "What would one take for severe malaria?" → {"intent":"condition_search","medicines":[],"condition":"severe malaria","suggestedMedicines":[{"name":"Artesunate","strength":null,"form":"Injection","quantity":null},{"name":"Quinine","strength":null,"form":"Tablet","quantity":null}]}
