@@ -57,10 +57,43 @@ const SUGGESTED = [
 ];
 
 
-// Camera/scan intent detection — avoids sending a photo request to the pharma consultation model
+// Camera/scan intent detection
 function isScanRequest(text: string): boolean {
   return /\b(scan|photo|picture|snap|camera|photograph)\b/i.test(text)
     && /\b(prescription|rx|pill|medicine|tablet|box|pack|label|capsule)\b/i.test(text);
+}
+
+// Extract medicine names from AI response text — no API call, never fails.
+// Covers the patterns AskRx always uses: "DrugName (Brand) dose" and "Generic (Brand)" pairs.
+const SKIP_WORDS = new Set(['Take', 'Use', 'Apply', 'This', 'The', 'For', 'With', 'Your', 'Each', 'Every', 'Once', 'Twice', 'Daily', 'Oral', 'Dose', 'Note', 'Blood', 'Pressure', 'Food', 'Water', 'After', 'Before', 'During', 'Side', 'Effects', 'Prices', 'Vary', 'Avoid', 'Both', 'Rinse', 'Mouth']);
+
+function extractMedicinesFromResponse(text: string): Medicine[] {
+  const seen = new Set<string>();
+  const result: Medicine[] = [];
+
+  const add = (name: string, strength: string | null) => {
+    const key = name.toLowerCase();
+    if (!seen.has(key) && !SKIP_WORDS.has(name) && name.length >= 4) {
+      seen.add(key);
+      result.push({ name, strength: strength ?? '', form: '', quantity: 0 });
+    }
+  };
+
+  // Pattern 1: DrugName (optional Brand in parens) dose — e.g. "Budesonide (Pulmicort) 200mcg"
+  const withDose = /\b([A-Z][a-z]{3,}(?:[- ][A-Za-z]{3,})?)\s*(?:\([A-Za-z\s]{2,20}\)\s*)?([\d.]+\s*(?:mg|mcg|g|ml|iu|units?)(?:\/[\d.]*(?:ml|mg|g))?)/g;
+  let m: RegExpExecArray | null;
+  while ((m = withDose.exec(text)) !== null) {
+    add(m[1].trim(), m[2].replace(/\s+/g, '').trim());
+  }
+
+  // Pattern 2: Generic (Brand) or Brand (Generic) pairs — e.g. "Salbutamol (Ventolin)"
+  const brandPair = /\b([A-Z][a-z]{3,})\s+\(([A-Z][a-z]{3,})\)/g;
+  while ((m = brandPair.exec(text)) !== null) {
+    add(m[1], null);
+    add(m[2], null);
+  }
+
+  return result.slice(0, 4);
 }
 
 export default function NexusPage() {
@@ -68,6 +101,7 @@ export default function NexusPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [streaming, setStreaming] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [attachedImage, setAttachedImage] = useState<{ base64: string; mimeType: string; preview: string } | null>(null);
@@ -203,16 +237,26 @@ export default function NexusPage() {
   };
 
   const consultFromCondition = async (query: string) => {
+    const history = messages.filter((m) => m.role === 'user' || m.role === 'ai').slice(-6)
+      .map((m) => ({ role: m.role === 'user' ? 'user' : 'model', text: m.text }));
+
     setLoading(true);
+    setStreaming(true);
+    const aiMsgId = `ai_${Date.now()}_${Math.random()}`;
+    setMessages((prev) => [...prev, { id: aiMsgId, role: 'ai', text: '', timestamp: new Date() }]);
+
     try {
-      const history = messages.filter((m) => m.role === 'user' || m.role === 'ai').slice(-6)
-        .map((m) => ({ role: m.role === 'user' ? 'user' : 'model', text: m.text }));
-      const result: ConsultResult = await brain.consult(query, history);
-      addMsg({ role: 'ai', text: result.text, flagged: result.flagged, patternsDetected: result.patternsDetected });
-    } catch (err) {
-      addMsg({ role: 'ai', text: err instanceof Error ? err.message : 'Could not connect. Please try again.' });
+      let spinnerCleared = false;
+      const result: ConsultResult = await brain.consultStream(query, history, (chunk) => {
+        if (!spinnerCleared) { spinnerCleared = true; setLoading(false); }
+        setMessages((prev) => prev.map((m) => m.id === aiMsgId ? { ...m, text: m.text + chunk } : m));
+      });
+      setMessages((prev) => prev.map((m) => m.id === aiMsgId ? { ...m, text: result.text, flagged: result.flagged, patternsDetected: result.patternsDetected } : m));
+    } catch {
+      setMessages((prev) => prev.map((m) => m.id === aiMsgId ? { ...m, text: 'Could not connect. Please try again.', isError: true, failedQuery: query } : m));
     } finally {
       setLoading(false);
+      setStreaming(false);
     }
   };
 
@@ -221,7 +265,7 @@ export default function NexusPage() {
     const messageText = text ?? input.trim();
     const image = attachedImage;
     if (!messageText && !image) return;
-    if (loading) return;
+    if (loading || streaming) return;
 
     addMsg({ role: 'user', text: messageText, imagePreview: image?.preview });
     setInput('');
@@ -260,57 +304,58 @@ export default function NexusPage() {
       return;
     }
 
-    // Text path: consult Gemma, then extract any medicines mentioned in the response
+    // Text path: stream the response so text appears immediately
+    if (isScanRequest(messageText)) {
+      addMsg({ role: 'ai', text: 'Tap the camera icon below to scan your prescription or medicine.' });
+      return;
+    }
+
+    const consultHistory = messages.filter((m) => m.role === 'user' || m.role === 'ai').slice(-6)
+      .map((m) => ({ role: m.role === 'user' ? 'user' : 'model', text: m.text }));
+
+    // Show thinking spinner; streaming=true blocks new sends during stream
     setLoading(true);
+    setStreaming(true);
+
+    // Pre-add an empty AI message to stream into
+    const aiMsgId = `ai_${Date.now()}_${Math.random()}`;
+    setMessages((prev) => [...prev, { id: aiMsgId, role: 'ai', text: '', timestamp: new Date() }]);
+
     try {
-      // Scan: skip the consultation model entirely
-      if (isScanRequest(messageText)) {
-        addMsg({ role: 'ai', text: 'Tap the camera icon below to scan your prescription or medicine.' });
-        return;
-      }
+      let spinnerCleared = false;
 
-      const consultHistory = messages.filter((m) => m.role === 'user' || m.role === 'ai').slice(-6)
-        .map((m) => ({ role: m.role === 'user' ? 'user' : 'model', text: m.text }));
-
-      const consultResult = await brain.consult(messageText, consultHistory);
-
-      // Extract medicine names from the response text — if Gemma mentioned any drug,
-      // offer to find it. No intent classification needed.
-      let suggestedAction: SuggestedAction | undefined;
-      try {
-        const extractRes = await fetch('/api/extract-medicines', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: consultResult.text }),
-        });
-        if (extractRes.ok) {
-          const { medicines }: { medicines: Medicine[] } = await extractRes.json();
-          if (medicines?.length > 0) {
-            suggestedAction = {
-              type: 'find_medicine',
-              medicines: medicines.slice(0, 4),
-              originalQuery: messageText,
-            };
-          }
-        }
-      } catch { /* no button if extraction fails — that's fine */ }
-
-      addMsg({
-        role: 'ai',
-        text: consultResult.text,
-        flagged: consultResult.flagged,
-        patternsDetected: consultResult.patternsDetected,
-        suggestedAction,
+      const consultResult = await brain.consultStream(messageText, consultHistory, (chunk) => {
+        if (!spinnerCleared) { spinnerCleared = true; setLoading(false); }
+        setMessages((prev) =>
+          prev.map((m) => m.id === aiMsgId ? { ...m, text: m.text + chunk } : m)
+        );
       });
+
+      // Extract medicine names from the clean final text — instant, no API call
+      const medicines = extractMedicinesFromResponse(consultResult.text);
+      const suggestedAction: SuggestedAction | undefined = medicines.length > 0
+        ? { type: 'find_medicine', medicines, originalQuery: messageText }
+        : undefined;
+
+      // Replace streamed (possibly dirty) text with safety-cleaned version + button
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === aiMsgId
+            ? { ...m, text: consultResult.text, flagged: consultResult.flagged, patternsDetected: consultResult.patternsDetected, suggestedAction }
+            : m
+        )
+      );
     } catch {
-      addMsg({
-        role: 'ai',
-        text: 'Connection dropped — Gemma couldn\'t be reached. Tap Retry to try again.',
-        isError: true,
-        failedQuery: messageText,
-      });
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === aiMsgId
+            ? { ...m, text: 'Connection dropped — Gemma couldn\'t be reached. Tap Retry to try again.', isError: true, failedQuery: messageText }
+            : m
+        )
+      );
     } finally {
       setLoading(false);
+      setStreaming(false);
     }
   };
 
@@ -400,7 +445,7 @@ export default function NexusPage() {
           ))}
         </AnimatePresence>
 
-        {loading && (
+        {(loading || streaming) && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
               <Avatar sx={{ width: 32, height: 32, bgcolor: 'rgba(0,229,160,0.15)' }}>
@@ -409,7 +454,7 @@ export default function NexusPage() {
               <Box sx={{ px: 2, py: 1.5, borderRadius: '4px 16px 16px 16px', bgcolor: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: 1 }}>
                 <CircularProgress size={14} sx={{ color: '#00E5A0' }} />
                 <Typography variant="body2" sx={{ color: '#64748B', fontSize: '0.8rem' }}>
-                  Gemma 4 is thinking…
+                  {loading ? 'Gemma 4 is thinking…' : 'Writing…'}
                 </Typography>
               </Box>
             </Box>
@@ -459,7 +504,7 @@ export default function NexusPage() {
             placeholder={transcribing ? 'Gemma 4 is correcting medical terms...' : recording ? 'Listening…' : 'Ask anything, or say what medicine you need…'}
             value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown}
             variant="standard" slotProps={{ input: { disableUnderline: true, sx: { color: '#E0F2F1', fontSize: '0.9rem' } } }} sx={{ flex: 1 }} />
-          <IconButton onClick={() => sendMessage()} disabled={(!input.trim() && !attachedImage) || loading}
+          <IconButton onClick={() => sendMessage()} disabled={(!input.trim() && !attachedImage) || loading || streaming}
             sx={{ color: (input.trim() || attachedImage) ? '#00E5A0' : '#475569', '&:hover': { color: '#4ADE80' }, flexShrink: 0 }}>
             <SendIcon />
           </IconButton>

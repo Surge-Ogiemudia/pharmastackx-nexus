@@ -4,7 +4,7 @@
 // It automatically chooses cloud vs edge inference based on connectivity.
 
 import { nexusLogger } from './nexus-logger';
-import { cloudInfer, cloudVisionInfer } from './nexus-cloud';
+import { cloudInfer, cloudInferStream, cloudVisionInfer } from './nexus-cloud';
 import { nexusEdge } from './nexus-edge';
 import {
   validateResponse,
@@ -352,7 +352,7 @@ Category:`;
     const response = await this.infer(prompt, {
       systemPrompt: guardedSystem,
       temperature: 0.4,
-      maxTokens: 180,
+      maxTokens: 120,
       allowEdgeFallback: true,
       edgeSystemPrompt: ASKRX_EDGE_SYSTEM,
     });
@@ -423,6 +423,87 @@ Category:`;
         logCorrectionResult(false, 'askrx', validation.patterns);
       }
 
+      return { text: clean, flagged: true, patternsDetected: validation.patterns, corrected: false };
+    }
+
+    return { text: clean, flagged: false, patternsDetected: [], corrected: false };
+  }
+
+  // ── Streaming Consultation ──
+
+  async consultStream(
+    message: string,
+    history: Array<{ role: string; text: string }> | undefined,
+    onChunk: (text: string) => void
+  ): Promise<ConsultResult> {
+    nexusLogger.emit('INTENT', '🎯 Intent: CONSULTATION (stream) — processing health question...');
+    const start = performance.now();
+
+    const contextMessages = history?.length
+      ? history.slice(-6).map((h) => `${h.role === 'user' ? 'User' : 'Pharmacist'}: ${h.text}`).join('\n') + '\n'
+      : '';
+    const prompt = `${contextMessages}User: ${message}\nPharmacist:`;
+    const guardedSystem = buildGuardedSystemPrompt(ASKRX_SYSTEM);
+
+    let rawText: string;
+    try {
+      rawText = await cloudInferStream(
+        prompt,
+        { systemPrompt: guardedSystem, temperature: 0.4, maxTokens: 120 },
+        onChunk
+      );
+    } catch {
+      const edgeReady = nexusEdge.status === 'ready';
+      if (edgeReady) {
+        nexusLogger.emit('SYSTEM', '📱 Cloud stream failed — falling back to on-device inference');
+        const lastQ = prompt.match(/User: ([\s\S]+?)\nPharmacist:\s*$/)?.[1]?.trim();
+        const edgePrompt = lastQ ? `${ASKRX_EDGE_SYSTEM}\n\nUser: ${lastQ}\nPharmacist:` : prompt;
+        rawText = await nexusEdge.infer(edgePrompt);
+        onChunk(rawText);
+      } else {
+        throw new Error('Gemma 4 is temporarily unavailable — please try again in a moment.');
+      }
+    }
+
+    const duration = Math.round(performance.now() - start);
+    nexusLogger.emit('INFERENCE', `⚡ Stream complete in ${duration}ms`, undefined, duration);
+
+    const rawClean = stripSystemLeaks(stripThinking(rawText));
+    const clean = deduplicateResponse(rawClean);
+    trackResponse();
+
+    if (!clean || clean.length < 5) {
+      return { text: "That's outside pharmacy — see a physician.", flagged: false, patternsDetected: [], corrected: false };
+    }
+
+    if (rawClean !== clean) {
+      logFailure({ feature: 'askrx', patterns: ['double_response'], trigger: message, bad_output_sample: rawClean, auto_detected: true });
+      logCorrectionResult(true, 'askrx', ['double_response']);
+    }
+
+    const validation = validateResponse(clean, 'askrx');
+
+    if (!validation.passed) {
+      logFailure({ feature: 'askrx', patterns: validation.patterns, trigger: message, bad_output_sample: clean, auto_detected: true });
+
+      const isCritical = validation.patterns.includes('thinking_leak') || validation.patterns.includes('double_response');
+      if (isCritical) {
+        nexusLogger.emit('SYSTEM', `🛡️ Safety: ${validation.patterns.join(' + ')} detected — retrying...`);
+        try {
+          const retrySystem = buildRetrySystemPrompt(guardedSystem, validation.patterns);
+          const retryResponse = await this.infer(prompt, {
+            systemPrompt: retrySystem, temperature: 0.3, maxTokens: 120,
+            allowEdgeFallback: true, edgeSystemPrompt: ASKRX_EDGE_SYSTEM,
+          });
+          const retryClean = stripSystemLeaks(stripThinking(retryResponse));
+          if (retryClean.length >= 5) {
+            const retryValidation = validateResponse(retryClean, 'askrx');
+            logCorrectionResult(retryValidation.passed, 'askrx', validation.patterns);
+            return { text: retryClean, flagged: !retryValidation.passed, patternsDetected: validation.patterns, corrected: true };
+          }
+        } catch { /* fall through */ }
+        logCorrectionResult(false, 'askrx', validation.patterns);
+      }
       return { text: clean, flagged: true, patternsDetected: validation.patterns, corrected: false };
     }
 
