@@ -2,12 +2,21 @@ import dbConnect from './mongoConnect';
 import NexusRequest from '@/models/NexusRequest';
 import type { Medicine } from './nexus-brain';
 
+export interface MedicineAvailability {
+  medicineIndex: number;
+  name: string;
+  available: boolean;
+  price: number;
+}
+
 export interface PharmacistResponse {
   pharmacistId: string;
   pharmacistName: string;
   pharmacistAddress: string;
   available: boolean;
-  price: number;
+  price: number;               // total price (sum of available items)
+  items?: MedicineAvailability[];
+  pharmacistNotes?: string;
   distance: number;
   responseRate: number;
   stockLikelihood: number;
@@ -19,12 +28,13 @@ export interface DispatchRequest {
   medicines: Medicine[];
   userState: string;
   userPhone: string;
+  patientNotes?: string;
   createdAt: string;
   responses: PharmacistResponse[];
 }
 
 export async function createRequest(
-  data: Pick<DispatchRequest, 'medicines' | 'userState' | 'userPhone'>
+  data: Pick<DispatchRequest, 'medicines' | 'userState' | 'userPhone' | 'patientNotes'>
 ): Promise<string> {
   await dbConnect();
   const id = Math.random().toString(36).slice(2, 9) + Date.now().toString(36);
@@ -69,6 +79,7 @@ function toDispatchRequest(doc: any): DispatchRequest {
     medicines: doc.medicines as Medicine[],
     userState: doc.userState as string,
     userPhone: doc.userPhone as string,
+    patientNotes: doc.patientNotes as string | undefined,
     createdAt: doc.createdAt instanceof Date
       ? doc.createdAt.toISOString()
       : (doc.createdAt as string),

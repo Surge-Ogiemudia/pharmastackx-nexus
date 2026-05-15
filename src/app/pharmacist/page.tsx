@@ -27,9 +27,16 @@ const MY_ID = 'psx-pharmacist';
 const MY_NAME = 'PharmaStackX Hub';
 const MY_ADDRESS = 'Innovation Quarter';
 
+interface MedItem {
+  available: boolean;
+  price: string;
+}
+
 interface RespondingState {
   requestId: string;
-  price: string;
+  medicines: { name: string; strength?: string; form?: string }[];
+  items: MedItem[];
+  pharmacistNotes: string;
 }
 
 export default function PharmacistPage() {
@@ -61,8 +68,11 @@ export default function PharmacistPage() {
   const myResponse = (req: DispatchRequest) =>
     req.responses.find((r) => r.pharmacistId === MY_ID);
 
-  const submitResponse = async (requestId: string, available: boolean, price?: number) => {
+  const submitResponse = async () => {
+    if (!responding) return;
     setLoading(true);
+    const { requestId, items, pharmacistNotes } = responding;
+    const hasAny = items.some((i) => i.available);
     try {
       await fetch(`/api/dispatch/${requestId}/respond`, {
         method: 'POST',
@@ -71,8 +81,14 @@ export default function PharmacistPage() {
           pharmacistId: MY_ID,
           pharmacistName: MY_NAME,
           pharmacistAddress: MY_ADDRESS,
-          available,
-          price: available ? (price ?? 0) : 0,
+          available: hasAny,
+          items: items.map((item, idx) => ({
+            medicineIndex: idx,
+            name: responding.medicines[idx]?.name ?? '',
+            available: item.available,
+            price: item.available ? (Number(item.price) || 0) : 0,
+          })),
+          pharmacistNotes: pharmacistNotes.trim() || undefined,
           distance: 0.8,
           responseRate: 98,
           stockLikelihood: 90,
@@ -184,27 +200,34 @@ export default function PharmacistPage() {
                           </Box>
                         </Box>
 
-                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mb: 2 }}>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mb: req.patientNotes ? 1 : 2 }}>
                           {req.medicines.map((med, i) => (
                             <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                               <MedicationIcon sx={{ fontSize: 14, color: '#C084FC' }} />
                               <Typography sx={{ fontSize: '0.85rem', color: '#E0F2F1', fontWeight: 600 }}>
                                 {med.name}{med.strength ? ` ${med.strength}` : ''}
                               </Typography>
-                              {med.form && (
-                                <Typography sx={{ fontSize: '0.72rem', color: '#64748B' }}>
-                                  · {med.form}
-                                </Typography>
-                              )}
+                              {med.form && <Typography sx={{ fontSize: '0.72rem', color: '#64748B' }}>· {med.form}</Typography>}
+                              {med.quantity && <Typography sx={{ fontSize: '0.72rem', color: '#64748B' }}>· qty {med.quantity}</Typography>}
                             </Box>
                           ))}
                         </Box>
+                        {req.patientNotes && (
+                          <Box sx={{ mb: 2, px: 1.25, py: 0.75, borderRadius: '8px', bgcolor: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.15)' }}>
+                            <Typography sx={{ fontSize: '0.72rem', color: '#FBBF24', fontStyle: 'italic' }}>"{req.patientNotes}"</Typography>
+                          </Box>
+                        )}
 
                         <Box sx={{ display: 'flex', gap: 1 }}>
                           <Button
                             variant="contained"
                             size="small"
-                            onClick={() => setResponding({ requestId: req.id, price: '' })}
+                            onClick={() => setResponding({
+                            requestId: req.id,
+                            medicines: req.medicines.map((m) => ({ name: m.name, strength: m.strength, form: m.form })),
+                            items: req.medicines.map(() => ({ available: true, price: '' })),
+                            pharmacistNotes: '',
+                          })}
                             sx={{
                               flex: 1,
                               bgcolor: '#00E5A0',
@@ -221,7 +244,12 @@ export default function PharmacistPage() {
                           <Button
                             variant="outlined"
                             size="small"
-                            onClick={() => submitResponse(req.id, false)}
+                            onClick={() => setResponding({
+                              requestId: req.id,
+                              medicines: req.medicines.map((m) => ({ name: m.name, strength: m.strength, form: m.form })),
+                              items: req.medicines.map(() => ({ available: false, price: '' })),
+                              pharmacistNotes: '',
+                            })}
                             disabled={loading}
                             sx={{
                               borderColor: 'rgba(248,113,113,0.3)',
@@ -305,7 +333,7 @@ export default function PharmacistPage() {
         )}
       </Box>
 
-      {/* Price dialog */}
+      {/* Per-medicine response dialog */}
       <Dialog
         open={!!responding}
         onClose={() => setResponding(null)}
@@ -315,7 +343,7 @@ export default function PharmacistPage() {
               bgcolor: '#0D1526',
               border: '1px solid rgba(0,229,160,0.2)',
               borderRadius: '16px',
-              maxWidth: 340,
+              maxWidth: 400,
               width: '100%',
               m: 2,
             },
@@ -324,64 +352,102 @@ export default function PharmacistPage() {
       >
         <DialogContent sx={{ p: 3 }}>
           <Typography variant="h6" sx={{ fontWeight: 700, color: '#E0F2F1', mb: 0.5 }}>
-            Set your price
+            Respond to request
           </Typography>
-          <Typography sx={{ color: '#64748B', fontSize: '0.82rem', mb: 2.5 }}>
-            Enter the total price for all medicines in this request
+          <Typography sx={{ color: '#64748B', fontSize: '0.82rem', mb: 2 }}>
+            Set availability and price for each medicine.
           </Typography>
 
-          <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, color: '#94A3B8', letterSpacing: '0.08em', textTransform: 'uppercase', mb: 0.75 }}>
-            Price
-          </Typography>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mb: 2 }}>
+            {responding?.items.map((item, idx) => {
+              const med = responding.medicines[idx];
+              return (
+                <Box key={idx} sx={{ p: 1.5, borderRadius: '10px', border: '1px solid rgba(255,255,255,0.07)', bgcolor: 'rgba(15,23,42,0.5)' }}>
+                  <Typography sx={{ fontSize: '0.85rem', fontWeight: 600, color: '#E0F2F1', mb: 1 }}>
+                    {med?.name}{med?.strength ? ` ${med.strength}` : ''}{med?.form ? ` · ${med.form}` : ''}
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 1, mb: item.available ? 1 : 0 }}>
+                    <Button
+                      size="small"
+                      onClick={() => setResponding((p) => p ? { ...p, items: p.items.map((it, i) => i === idx ? { ...it, available: true } : it) } : null)}
+                      sx={{
+                        flex: 1, textTransform: 'none', borderRadius: '8px', fontSize: '0.78rem', fontWeight: 600,
+                        bgcolor: item.available ? 'rgba(0,229,160,0.15)' : 'transparent',
+                        color: item.available ? '#00E5A0' : '#64748B',
+                        border: `1px solid ${item.available ? 'rgba(0,229,160,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                      }}
+                    >✓ In stock</Button>
+                    <Button
+                      size="small"
+                      onClick={() => setResponding((p) => p ? { ...p, items: p.items.map((it, i) => i === idx ? { ...it, available: false, price: '' } : it) } : null)}
+                      sx={{
+                        flex: 1, textTransform: 'none', borderRadius: '8px', fontSize: '0.78rem', fontWeight: 600,
+                        bgcolor: !item.available ? 'rgba(248,113,113,0.1)' : 'transparent',
+                        color: !item.available ? '#F87171' : '#64748B',
+                        border: `1px solid ${!item.available ? 'rgba(248,113,113,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                      }}
+                    >✗ Not available</Button>
+                  </Box>
+                  {item.available && (
+                    <TextField
+                      fullWidth size="small" type="number" placeholder="Price"
+                      value={item.price}
+                      onChange={(e) => setResponding((p) => p ? { ...p, items: p.items.map((it, i) => i === idx ? { ...it, price: e.target.value } : it) } : null)}
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          bgcolor: 'rgba(15,23,42,0.7)', color: '#E0F2F1', borderRadius: '8px', fontSize: '0.95rem', fontWeight: 700,
+                          '& fieldset': { borderColor: 'rgba(255,255,255,0.08)' },
+                          '&:hover fieldset': { borderColor: 'rgba(0,229,160,0.3)' },
+                          '&.Mui-focused fieldset': { borderColor: '#00E5A0' },
+                        },
+                        '& .MuiInputBase-input::placeholder': { color: '#475569', fontWeight: 400 },
+                      }}
+                    />
+                  )}
+                </Box>
+              );
+            })}
+          </Box>
+
+          {/* Total */}
+          {responding && responding.items.some((i) => i.available && i.price) && (
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1.5, px: 0.5 }}>
+              <Typography sx={{ fontSize: '0.82rem', color: '#64748B' }}>Total</Typography>
+              <Typography sx={{ fontSize: '0.95rem', fontWeight: 700, color: '#00E5A0' }}>
+                {responding.items.filter((i) => i.available && i.price).reduce((s, i) => s + Number(i.price), 0).toLocaleString()}
+              </Typography>
+            </Box>
+          )}
+
+          {/* Pharmacist notes */}
           <TextField
-            fullWidth
-            size="small"
-            type="number"
-            placeholder="e.g. 25"
-            value={responding?.price ?? ''}
-            onChange={(e) => setResponding((prev) => prev ? { ...prev, price: e.target.value } : null)}
+            fullWidth size="small" placeholder="Notes to patient (optional)"
+            value={responding?.pharmacistNotes ?? ''}
+            onChange={(e) => setResponding((p) => p ? { ...p, pharmacistNotes: e.target.value } : null)}
             sx={{
-              mb: 2.5,
+              mb: 2,
               '& .MuiOutlinedInput-root': {
-                bgcolor: 'rgba(15,23,42,0.7)',
-                color: '#E0F2F1',
-                borderRadius: '10px',
-                fontSize: '1.1rem',
-                fontWeight: 700,
+                bgcolor: 'rgba(15,23,42,0.7)', color: '#E0F2F1', borderRadius: '10px',
                 '& fieldset': { borderColor: 'rgba(255,255,255,0.08)' },
                 '&:hover fieldset': { borderColor: 'rgba(0,229,160,0.3)' },
                 '&.Mui-focused fieldset': { borderColor: '#00E5A0' },
               },
-              '& .MuiInputBase-input::placeholder': { color: '#475569', fontWeight: 400, fontSize: '0.9rem' },
+              '& .MuiInputBase-input::placeholder': { color: '#475569', fontSize: '0.85rem' },
             }}
           />
 
           <Box sx={{ display: 'flex', gap: 1 }}>
-            <Button
-              variant="outlined"
-              onClick={() => setResponding(null)}
-              sx={{ flex: 1, borderColor: 'rgba(255,255,255,0.08)', color: '#64748B', textTransform: 'none', borderRadius: '10px' }}
-            >
+            <Button variant="outlined" onClick={() => setResponding(null)}
+              sx={{ flex: 1, borderColor: 'rgba(255,255,255,0.08)', color: '#64748B', textTransform: 'none', borderRadius: '10px' }}>
               Cancel
             </Button>
             <Button
               variant="contained"
-              disabled={!responding?.price || loading}
-              onClick={() => {
-                if (responding) submitResponse(responding.requestId, true, Number(responding.price));
-              }}
-              sx={{
-                flex: 2,
-                bgcolor: '#00E5A0',
-                color: '#0F172A',
-                fontWeight: 700,
-                textTransform: 'none',
-                borderRadius: '10px',
-                '&:hover': { bgcolor: '#00C987' },
-                '&.Mui-disabled': { bgcolor: 'rgba(0,229,160,0.15)', color: '#334155' },
-              }}
+              disabled={loading || !responding?.items.some((i) => i.available ? !!i.price : true)}
+              onClick={submitResponse}
+              sx={{ flex: 2, bgcolor: '#00E5A0', color: '#0F172A', fontWeight: 700, textTransform: 'none', borderRadius: '10px', '&:hover': { bgcolor: '#00C987' }, '&.Mui-disabled': { bgcolor: 'rgba(0,229,160,0.15)', color: '#334155' } }}
             >
-              Confirm & Send
+              Send Response
             </Button>
           </Box>
         </DialogContent>

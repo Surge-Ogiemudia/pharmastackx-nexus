@@ -3,14 +3,14 @@ import { createRequest, getAllActive } from '@/lib/dispatch-store';
 
 export async function POST(req: NextRequest) {
   try {
-    const { medicines, userState, userPhone } = await req.json();
+    const { medicines, userState, userPhone, patientNotes } = await req.json();
     if (!medicines?.length || !userState || !userPhone) {
       return NextResponse.json(
         { error: 'medicines, userState, and userPhone are required' },
         { status: 400 }
       );
     }
-    const id = await createRequest({ medicines, userState, userPhone });
+    const id = await createRequest({ medicines, userState, userPhone, patientNotes: patientNotes ?? undefined });
     return NextResponse.json({ requestId: id });
   } catch (err) {
     console.error('[dispatch POST]', err);

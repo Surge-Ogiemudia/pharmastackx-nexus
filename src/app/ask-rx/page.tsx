@@ -21,7 +21,7 @@ import { useRouter } from 'next/navigation';
 import type { ConsultResult, Medicine } from '@/lib/nexus-brain';
 import type { PharmacistResponse } from '@/lib/dispatch-store';
 
-type MessageRole = 'user' | 'ai' | 'system' | 'dispatch' | 'suggestion';
+type MessageRole = 'user' | 'ai' | 'system' | 'dispatch' | 'suggestion' | 'detail_form';
 
 interface Message {
   id: string;
@@ -36,6 +36,7 @@ interface Message {
   suggestedMedicines?: Medicine[];
   condition?: string;
   originalQuery?: string;
+  pendingMedicines?: Medicine[];
 }
 
 const SUGGESTED = [
@@ -162,12 +163,12 @@ export default function NexusPage() {
   };
 
   // ── Dispatch ──
-  const doDispatch = async (medicines: Medicine[], state: string, phone: string) => {
+  const doDispatch = async (medicines: Medicine[], state: string, phone: string, patientNotes?: string) => {
     try {
       const res = await fetch('/api/dispatch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ medicines, userState: state, userPhone: phone }),
+        body: JSON.stringify({ medicines, userState: state, userPhone: phone, patientNotes }),
       });
       if (!res.ok) throw new Error('Dispatch failed');
       const { requestId } = await res.json();
@@ -177,9 +178,9 @@ export default function NexusPage() {
     }
   };
 
-  const triggerDispatch = async (medicines: Medicine[]) => {
+  const triggerDispatch = async (medicines: Medicine[], patientNotes?: string) => {
     if (userState && userPhone) {
-      await doDispatch(medicines, userState, userPhone);
+      await doDispatch(medicines, userState, userPhone, patientNotes);
     } else {
       setPendingMedicines(medicines);
       setSetupOpen(true);
@@ -370,8 +371,13 @@ export default function NexusPage() {
                 <SuggestionCard
                   medicines={msg.suggestedMedicines}
                   condition={msg.condition}
-                  onDispatch={(meds) => triggerDispatch(meds)}
+                  onDispatch={(meds) => addMsg({ role: 'detail_form', text: '', pendingMedicines: meds })}
                   onConsult={() => consultFromCondition(msg.originalQuery ?? msg.text)}
+                />
+              ) : msg.role === 'detail_form' && msg.pendingMedicines ? (
+                <DetailFormCard
+                  medicines={msg.pendingMedicines}
+                  onSubmit={(meds, notes) => triggerDispatch(meds, notes)}
                 />
               ) : msg.role === 'system' ? (
                 <Box sx={{ textAlign: 'center', py: 0.5 }}>
@@ -477,6 +483,119 @@ export default function NexusPage() {
   );
 }
 
+// ── Detail form card (collect strength / form / qty / notes before dispatch) ──
+
+const FORM_OPTIONS = ['Tablet', 'Capsule', 'Syrup', 'Cream', 'Injection', 'Nebules', 'Drops', 'Patch', 'Suppository'];
+const UNIT_OPTIONS = ['Tablet', 'Strip', 'Sachet', 'Bottle', 'Tube', 'Vial', 'Pack'];
+
+function DetailFormCard({ medicines, onSubmit }: {
+  medicines: Medicine[];
+  onSubmit: (medicines: Medicine[], patientNotes: string) => void;
+}) {
+  const [details, setDetails] = useState<{ strength: string; form: string; unit: string; quantity: string }[]>(
+    medicines.map((m) => ({ strength: m.strength ?? '', form: m.form ?? '', unit: '', quantity: m.quantity ? String(m.quantity) : '' }))
+  );
+  const [notes, setNotes] = useState('');
+  const [submitted, setSubmitted] = useState(false);
+
+  const update = (idx: number, field: string, val: string) =>
+    setDetails((prev) => prev.map((d, i) => i === idx ? { ...d, [field]: val } : d));
+
+  const handleSubmit = () => {
+    if (submitted) return;
+    setSubmitted(true);
+    const enriched = medicines.map((m, i) => ({
+      ...m,
+      strength: details[i].strength || m.strength,
+      form: details[i].form || m.form,
+      unit: details[i].unit || undefined,
+      quantity: details[i].quantity ? Number(details[i].quantity) : m.quantity,
+    }));
+    onSubmit(enriched, notes);
+  };
+
+  return (
+    <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
+      <Avatar sx={{ width: 32, height: 32, bgcolor: 'rgba(0,229,160,0.15)', flexShrink: 0 }}>
+        <SmartToyIcon sx={{ fontSize: 18, color: '#00E5A0' }} />
+      </Avatar>
+      <Box sx={{ flex: 1, borderRadius: '4px 16px 16px 16px', bgcolor: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', p: 2 }}>
+        <Typography sx={{ fontSize: '0.85rem', color: '#E0F2F1', fontWeight: 500, mb: 0.25 }}>
+          A few quick details — fill in what you know
+        </Typography>
+        <Typography sx={{ fontSize: '0.72rem', color: '#64748B', mb: 2 }}>
+          All optional. If you're unsure, skip — the pharmacist will suggest.
+        </Typography>
+
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: 2 }}>
+          {medicines.map((m, idx) => (
+            <Box key={idx} sx={{ p: 1.5, borderRadius: '10px', border: '1px solid rgba(255,255,255,0.07)', bgcolor: 'rgba(15,23,42,0.4)' }}>
+              <Typography sx={{ fontSize: '0.82rem', fontWeight: 700, color: '#C084FC', mb: 1.25 }}>
+                {m.name}
+              </Typography>
+
+              {/* Strength */}
+              <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, color: '#64748B', letterSpacing: '0.08em', textTransform: 'uppercase', mb: 0.5 }}>
+                Strength / dose
+              </Typography>
+              <TextField fullWidth size="small" placeholder="e.g. 5mg, 250mg/5ml" value={details[idx].strength}
+                onChange={(e) => update(idx, 'strength', e.target.value)} disabled={submitted}
+                sx={{ mb: 1.25, '& .MuiOutlinedInput-root': { bgcolor: 'rgba(15,23,42,0.6)', color: '#E0F2F1', borderRadius: '8px', fontSize: '0.85rem', '& fieldset': { borderColor: 'rgba(255,255,255,0.08)' }, '&.Mui-focused fieldset': { borderColor: '#00E5A0' } }, '& .MuiInputBase-input::placeholder': { color: '#475569' } }} />
+
+              {/* Form */}
+              <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, color: '#64748B', letterSpacing: '0.08em', textTransform: 'uppercase', mb: 0.5 }}>
+                Form
+              </Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1.25 }}>
+                {FORM_OPTIONS.map((f) => (
+                  <Box key={f} onClick={() => !submitted && update(idx, 'form', details[idx].form === f ? '' : f)}
+                    sx={{ px: 1, py: 0.4, borderRadius: '6px', cursor: submitted ? 'default' : 'pointer', fontSize: '0.72rem', fontWeight: details[idx].form === f ? 700 : 400, color: details[idx].form === f ? '#0F172A' : '#64748B', bgcolor: details[idx].form === f ? '#00E5A0' : 'rgba(255,255,255,0.05)', border: `1px solid ${details[idx].form === f ? '#00E5A0' : 'rgba(255,255,255,0.08)'}`, transition: 'all 0.12s' }}>
+                    {f}
+                  </Box>
+                ))}
+              </Box>
+
+              {/* Qty + Unit */}
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Box sx={{ flex: 1 }}>
+                  <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, color: '#64748B', letterSpacing: '0.08em', textTransform: 'uppercase', mb: 0.5 }}>Quantity</Typography>
+                  <TextField fullWidth size="small" type="number" placeholder="e.g. 30" value={details[idx].quantity}
+                    onChange={(e) => update(idx, 'quantity', e.target.value)} disabled={submitted}
+                    sx={{ '& .MuiOutlinedInput-root': { bgcolor: 'rgba(15,23,42,0.6)', color: '#E0F2F1', borderRadius: '8px', fontSize: '0.85rem', '& fieldset': { borderColor: 'rgba(255,255,255,0.08)' }, '&.Mui-focused fieldset': { borderColor: '#00E5A0' } }, '& .MuiInputBase-input::placeholder': { color: '#475569' } }} />
+                </Box>
+                <Box sx={{ flex: 1 }}>
+                  <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, color: '#64748B', letterSpacing: '0.08em', textTransform: 'uppercase', mb: 0.5 }}>Unit</Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.4 }}>
+                    {UNIT_OPTIONS.map((u) => (
+                      <Box key={u} onClick={() => !submitted && update(idx, 'unit', details[idx].unit === u ? '' : u)}
+                        sx={{ px: 0.75, py: 0.35, borderRadius: '5px', cursor: submitted ? 'default' : 'pointer', fontSize: '0.68rem', fontWeight: details[idx].unit === u ? 700 : 400, color: details[idx].unit === u ? '#0F172A' : '#64748B', bgcolor: details[idx].unit === u ? '#00E5A0' : 'rgba(255,255,255,0.05)', border: `1px solid ${details[idx].unit === u ? '#00E5A0' : 'rgba(255,255,255,0.08)'}`, transition: 'all 0.12s' }}>
+                        {u}
+                      </Box>
+                    ))}
+                  </Box>
+                </Box>
+              </Box>
+            </Box>
+          ))}
+        </Box>
+
+        {/* Notes */}
+        <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, color: '#64748B', letterSpacing: '0.08em', textTransform: 'uppercase', mb: 0.5 }}>
+          Notes for pharmacist
+        </Typography>
+        <TextField fullWidth size="small" placeholder="e.g. Original brand only, no generic" value={notes}
+          onChange={(e) => setNotes(e.target.value)} disabled={submitted}
+          sx={{ mb: 2, '& .MuiOutlinedInput-root': { bgcolor: 'rgba(15,23,42,0.6)', color: '#E0F2F1', borderRadius: '8px', '& fieldset': { borderColor: 'rgba(255,255,255,0.08)' }, '&.Mui-focused fieldset': { borderColor: '#00E5A0' } }, '& .MuiInputBase-input::placeholder': { color: '#475569', fontSize: '0.85rem' } }} />
+
+        <Button variant="contained" fullWidth disabled={submitted} onClick={handleSubmit}
+          sx={{ bgcolor: '#00E5A0', color: '#0F172A', fontWeight: 700, textTransform: 'none', borderRadius: '10px', '&:hover': { bgcolor: '#00C987' }, '&.Mui-disabled': { bgcolor: 'rgba(0,229,160,0.15)', color: '#334155' } }}>
+          {submitted ? 'Sending request…' : 'Send Request →'}
+        </Button>
+      </Box>
+    </Box>
+  );
+}
+
 // ── Inline dispatch card ──
 
 function DispatchCard({ medicines, requestId, onSelect }: {
@@ -546,16 +665,42 @@ function DispatchCard({ medicines, requestId, onSelect }: {
               {available.length} pharmacist{available.length > 1 ? 's' : ''} available
             </Typography>
             {available.map((r, i) => (
-              <Box key={i} sx={{ p: 1.5, borderRadius: '10px', bgcolor: 'rgba(0,229,160,0.04)', border: '1px solid rgba(0,229,160,0.15)', display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Typography sx={{ fontSize: '0.85rem', fontWeight: 700, color: '#E0F2F1' }}>{r.pharmacistName}</Typography>
-                  <Typography sx={{ fontSize: '0.7rem', color: '#64748B' }}>{r.pharmacistAddress} · {r.distance}km</Typography>
-                  <Typography sx={{ fontSize: '0.85rem', fontWeight: 700, color: '#00E5A0', mt: 0.25 }}>{r.price.toLocaleString()}</Typography>
+              <Box key={i} sx={{ p: 1.5, borderRadius: '10px', bgcolor: 'rgba(0,229,160,0.04)', border: '1px solid rgba(0,229,160,0.15)' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: r.items?.length ? 1 : 0 }}>
+                  <Box>
+                    <Typography sx={{ fontSize: '0.85rem', fontWeight: 700, color: '#E0F2F1' }}>{r.pharmacistName}</Typography>
+                    <Typography sx={{ fontSize: '0.7rem', color: '#64748B' }}>{r.pharmacistAddress} · {r.distance}km</Typography>
+                  </Box>
+                  <Button variant="contained" size="small" onClick={() => onSelect(r)}
+                    sx={{ bgcolor: '#00E5A0', color: '#0F172A', fontWeight: 700, fontSize: '0.75rem', textTransform: 'none', borderRadius: '8px', '&:hover': { bgcolor: '#00C987' }, flexShrink: 0 }}>
+                    Select →
+                  </Button>
                 </Box>
-                <Button variant="contained" size="small" onClick={() => onSelect(r)}
-                  sx={{ bgcolor: '#00E5A0', color: '#0F172A', fontWeight: 700, fontSize: '0.75rem', textTransform: 'none', borderRadius: '8px', '&:hover': { bgcolor: '#00C987' }, flexShrink: 0 }}>
-                  Select →
-                </Button>
+                {r.items?.length ? (
+                  <Box sx={{ mt: 0.75 }}>
+                    {r.items.map((item, j) => (
+                      <Box key={j} sx={{ display: 'flex', justifyContent: 'space-between', py: 0.4, borderBottom: j < r.items!.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
+                        <Typography sx={{ fontSize: '0.78rem', color: item.available ? '#94A3B8' : '#475569' }}>
+                          {item.available ? '' : '✗ '}{item.name}
+                        </Typography>
+                        <Typography sx={{ fontSize: '0.78rem', fontWeight: 600, color: item.available ? '#E0F2F1' : '#475569' }}>
+                          {item.available ? item.price.toLocaleString() : 'Not available'}
+                        </Typography>
+                      </Box>
+                    ))}
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', pt: 0.75, mt: 0.25 }}>
+                      <Typography sx={{ fontSize: '0.78rem', fontWeight: 700, color: '#64748B' }}>Total</Typography>
+                      <Typography sx={{ fontSize: '0.9rem', fontWeight: 700, color: '#00E5A0' }}>{r.price.toLocaleString()}</Typography>
+                    </Box>
+                  </Box>
+                ) : (
+                  <Typography sx={{ fontSize: '0.85rem', fontWeight: 700, color: '#00E5A0', mt: 0.5 }}>{r.price.toLocaleString()}</Typography>
+                )}
+                {r.pharmacistNotes && (
+                  <Typography sx={{ fontSize: '0.72rem', color: '#64748B', mt: 0.75, fontStyle: 'italic' }}>
+                    "{r.pharmacistNotes}"
+                  </Typography>
+                )}
               </Box>
             ))}
           </Box>
