@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Box, Typography, TextField, IconButton, Avatar, CircularProgress,
-  Chip, Button, Select, MenuItem, Dialog, DialogContent,
+  Chip, Button, Select, MenuItem, Dialog, DialogContent, ListSubheader,
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
@@ -272,7 +272,7 @@ export default function NexusPage() {
 
     setLoading(true);
     try {
-      const result: ConsultResult = await brain.consult(query, history);
+      const result: ConsultResult = await brain.consult(query, history, speechLang);
       addMsg({ role: 'ai', text: result.text, flagged: result.flagged, patternsDetected: result.patternsDetected });
     } catch {
       addMsg({ role: 'ai', text: 'Could not connect. Please try again.', isError: true, failedQuery: query });
@@ -343,7 +343,7 @@ export default function NexusPage() {
     setLoading(true);
 
     try {
-      const consultResult = await brain.consult(messageText, consultHistory);
+      const consultResult = await brain.consult(messageText, consultHistory, speechLang);
       const medicines = extractMedicinesFromResponse(consultResult.text);
       const suggestedAction: SuggestedAction | undefined = medicines.length > 0
         ? { type: 'find_medicine', medicines, originalQuery: messageText }
@@ -476,15 +476,23 @@ export default function NexusPage() {
           <Select value={speechLang} onChange={(e) => setSpeechLang(e.target.value)} size="small" variant="outlined"
             sx={{ fontSize: '0.7rem', height: 24, color: '#C084FC', bgcolor: 'rgba(192,132,252,0.08)', border: '1px solid rgba(192,132,252,0.25)', borderRadius: '8px', '& .MuiOutlinedInput-notchedOutline': { border: 'none' }, '& .MuiSelect-select': { py: 0, px: 1 }, '& .MuiSvgIcon-root': { color: '#C084FC', fontSize: 16 } }}
             MenuProps={{ slotProps: { paper: { sx: { bgcolor: '#1A2540', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px', mt: 0.5, '& .MuiMenuItem-root': { fontSize: '0.8rem', color: '#CBD5E1', py: 0.75, '&:hover': { bgcolor: 'rgba(192,132,252,0.1)', color: '#E0F2F1' }, '&.Mui-selected': { bgcolor: 'rgba(192,132,252,0.15)', color: '#C084FC', fontWeight: 700 } } } } } }}>
+            <ListSubheader sx={{ bgcolor: '#1A2540', color: '#475569', fontSize: '0.65rem', letterSpacing: '0.08em', textTransform: 'uppercase', lineHeight: '28px' }}>Preferred</ListSubheader>
             <MenuItem value="en-US">English</MenuItem>
             <MenuItem value="fr-FR">French</MenuItem>
-            <MenuItem value="es-ES">Spanish</MenuItem>
             <MenuItem value="ar">Arabic</MenuItem>
-            <MenuItem value="pt-BR">Portuguese</MenuItem>
             <MenuItem value="sw">Swahili</MenuItem>
+            <ListSubheader sx={{ bgcolor: '#1A2540', color: '#475569', fontSize: '0.65rem', letterSpacing: '0.08em', textTransform: 'uppercase', lineHeight: '28px' }}>African</ListSubheader>
             <MenuItem value="yo">Yoruba</MenuItem>
             <MenuItem value="ig">Igbo</MenuItem>
             <MenuItem value="ha">Hausa</MenuItem>
+            <MenuItem value="am">Amharic</MenuItem>
+            <MenuItem value="zu">Zulu</MenuItem>
+            <ListSubheader sx={{ bgcolor: '#1A2540', color: '#475569', fontSize: '0.65rem', letterSpacing: '0.08em', textTransform: 'uppercase', lineHeight: '28px' }}>Global</ListSubheader>
+            <MenuItem value="es-ES">Spanish</MenuItem>
+            <MenuItem value="pt-BR">Portuguese</MenuItem>
+            <MenuItem value="hi-IN">Hindi</MenuItem>
+            <MenuItem value="zh-CN">Chinese</MenuItem>
+            <MenuItem value="de-DE">German</MenuItem>
           </Select>
         </Box>
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end', bgcolor: 'rgba(15,23,42,0.6)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)', px: 2, py: 1, transition: 'border-color 0.2s ease', '&:focus-within': { borderColor: 'rgba(0,229,160,0.3)' } }}>

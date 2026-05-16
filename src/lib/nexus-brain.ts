@@ -161,6 +161,24 @@ EXAMPLES — these show the pattern, not an exhaustive list:
 
 If not a drug request: {"isDrugRequest":false,"medicines":[],"location":null,"urgency":"normal","confidence":0.05}`;
 
+// ── Language map ─────────────────────────────────────────────────────────────
+
+const LANG_NAMES: Record<string, string> = {
+  'fr-FR': 'French', 'fr': 'French',
+  'es-ES': 'Spanish', 'es': 'Spanish',
+  'ar': 'Arabic',
+  'pt-BR': 'Portuguese', 'pt': 'Portuguese',
+  'sw': 'Swahili',
+  'yo': 'Yoruba',
+  'ig': 'Igbo',
+  'ha': 'Hausa',
+  'hi-IN': 'Hindi', 'hi': 'Hindi',
+  'zh-CN': 'Mandarin Chinese', 'zh': 'Chinese',
+  'de-DE': 'German', 'de': 'German',
+  'am': 'Amharic',
+  'zu': 'Zulu',
+};
+
 // ── Brain Class ──────────────────────────────────────────────────────────────
 
 class NexusBrain {
@@ -323,11 +341,23 @@ Category:`;
 
   // ── Consultation (AskRX) ──
 
-  async consult(message: string, history?: Array<{ role: string; text: string }>): Promise<ConsultResult> {
+  async consult(
+    message: string,
+    history?: Array<{ role: string; text: string }>,
+    responseLang?: string
+  ): Promise<ConsultResult> {
     nexusLogger.emit('INTENT', '🎯 Intent: CONSULTATION — processing health question...');
     nexusLogger.emit('INFERENCE', `⚡ Generating response for: "${message.substring(0, 60)}..."`);
 
     const start = performance.now();
+
+    const langName = responseLang && !responseLang.startsWith('en')
+      ? (LANG_NAMES[responseLang] ?? null)
+      : null;
+
+    if (langName) nexusLogger.emit('SYSTEM', `🌍 Responding in ${langName}`);
+
+    const langSuffix = langName ? `\nRespond in ${langName}. Keep the same clinical accuracy and tone.` : '';
 
     const contextMessages = history && history.length > 0
       ? history.slice(-6).map((h) => `${h.role === 'user' ? 'User' : 'Pharmacist'}: ${h.text}`).join('\n') + '\n'
@@ -336,11 +366,11 @@ Category:`;
     const prompt = `${contextMessages}User: ${message}\nPharmacist:`;
 
     const response = await this.infer(prompt, {
-      systemPrompt: buildGuardedSystemPrompt(ASKRX_SYSTEM),
+      systemPrompt: buildGuardedSystemPrompt(ASKRX_SYSTEM) + langSuffix,
       temperature: 0.4,
-      maxTokens: 120,
+      maxTokens: 140,
       allowEdgeFallback: true,
-      edgeSystemPrompt: ASKRX_EDGE_SYSTEM,
+      edgeSystemPrompt: ASKRX_EDGE_SYSTEM + langSuffix,
     });
 
     const duration = Math.round(performance.now() - start);
@@ -370,11 +400,6 @@ Category:`;
     if (!rawTranscript.trim()) return rawTranscript;
 
     const isEnglish = lang.startsWith('en');
-    const LANG_NAMES: Record<string, string> = {
-      'fr-FR': 'French', 'es-ES': 'Spanish', 'ar': 'Arabic',
-      'pt-BR': 'Portuguese', 'sw': 'Swahili',
-      'yo': 'Yoruba', 'ig': 'Igbo', 'ha': 'Hausa',
-    };
     const langName = LANG_NAMES[lang] ?? 'English';
     nexusLogger.emit('INFERENCE', `🎙️ Gemma 4 E2B ${isEnglish ? 'correcting' : `translating from ${langName}`}: "${rawTranscript.substring(0, 50)}"`);
 
