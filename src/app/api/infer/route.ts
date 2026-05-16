@@ -33,9 +33,22 @@ function clean(raw: string): string {
     .join('\n')
     .trim();
 
-  // Cap at 3 sentences
+  // Take sentences until we hit a near-duplicate (model outputting a revised version of its answer).
+  // Words >4 chars are the signal — filler words like "the", "and" are ignored.
   const sentences = text.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 10);
-  return (sentences.length > 3 ? sentences.slice(0, 3).join(' ') : text).trim();
+  const result: string[] = [];
+  const seenWords = new Set<string>();
+  for (const s of sentences) {
+    const words = s.toLowerCase().split(/\s+/).filter(w => w.length > 4);
+    const overlap = result.length > 0
+      ? words.filter(w => seenWords.has(w)).length / Math.max(words.length, 1)
+      : 0;
+    if (overlap > 0.5) break; // >50% word overlap = the model is repeating itself — stop
+    words.forEach(w => seenWords.add(w));
+    result.push(s);
+    if (result.length >= 3) break;
+  }
+  return result.join(' ').trim();
 }
 
 export async function POST(req: NextRequest) {
