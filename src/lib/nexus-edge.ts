@@ -211,7 +211,8 @@ class NexusEdge {
       nexusLogger.emit('SYSTEM', '✅ Gemma 4 E2B Edge engine ready — on-device inference enabled');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      nexusLogger.emit('ERROR', `❌ Edge initialization failed: ${message}`);
+      const isWasm = message.includes('unreachable') || message.includes('Aborted') || message.includes('memory access');
+      nexusLogger.emit('ERROR', `❌ Edge initialization failed${isWasm ? ' (WASM crash)' : ''}: ${message.substring(0, 120)}`);
       this.setStatus('error');
     }
   }
@@ -244,16 +245,28 @@ class NexusEdge {
         }
       });
     } catch (err) {
-      // Engine stuck (overflow or interrupted) — reset so next call can recover
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes('Previous invocation') || msg.includes('INVALID_ARGUMENT') || msg.includes('Input is too long')) {
+
+      const isWasmCrash =
+        msg.includes('memory access out of bounds') ||
+        msg.includes('unreachable') ||
+        msg.includes('Aborted') ||
+        msg.includes('RuntimeError');
+
+      if (isWasmCrash) {
+        // WASM heap is corrupted — do not attempt re-init, it will crash again
+        nexusLogger.emit('ERROR', '❌ WASM engine crash — edge inference disabled for this session');
+        this.engine = null;
+        this.setStatus('error');
+      } else if (msg.includes('Previous invocation') || msg.includes('INVALID_ARGUMENT') || msg.includes('Input is too long')) {
+        // Engine stuck but recoverable — reset and reload from cache
         nexusLogger.emit('SYSTEM', '🔄 Edge engine stuck — resetting for next use...');
         this.engine = null;
         this._status = 'uninitialized';
-        // Reload from OPFS cache in background so next call works
         this.initialize().catch(() => {});
       }
-      throw err;
+
+      throw new Error('On-device inference unavailable — using cloud.');
     }
 
     const duration = Math.round(performance.now() - start);
