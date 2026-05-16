@@ -484,8 +484,11 @@ Category:`;
       nexusLogger.emit('SYSTEM', '🛡️ Response stripped to empty — retrying with direct prompt...');
       logFailure({ feature: 'askrx', patterns: ['thinking_leak'], trigger: message, bad_output_sample: rawText.substring(0, 200), auto_detected: true });
       try {
-        const directPrompt = `You are a clinical pharmacist. Answer in 2-3 sentences: name the drug, dose, frequency.\n\nQuestion: ${message}\n\nAnswer:`;
-        const directResponse = await cloudInfer(directPrompt, { temperature: 0.2, maxTokens: 150 });
+        const directResponse = await cloudInfer(`User: ${message}\nPharmacist:`, {
+          systemPrompt: ASKRX_SYSTEM,
+          temperature: 0.2,
+          maxTokens: 150,
+        });
         const directClean = stripSystemLeaks(stripThinking(directResponse));
         if (directClean.length >= 5) {
           logCorrectionResult(true, 'askrx', ['thinking_leak']);
@@ -852,13 +855,18 @@ function stripThinking(text: string): string {
     if (before.length > 20) return before;
   }
 
-  // Phase 3: If the model started with *...* blocks, strip them all and return remaining content
+  // Phase 3: If the model started with *...* blocks (pure thinking from the start), return ''.
+  // The answer comes BEFORE thinking, so if the first substantive line is *, the whole
+  // response is thinking — signal empty to caller to trigger the direct-prompt retry.
   if (/^\s*\*/m.test(text)) {
+    const firstSubstantiveLine = text.split('\n').find((l) => l.trim().length > 0) ?? '';
+    if (/^\s*\*/.test(firstSubstantiveLine)) return '';
+    // Clean content came first; strip *-blocks and return remaining sentences
     const withoutBlocks = text
       .replace(/\*[^*\n]{0,300}\*/g, '')
       .replace(/^\s*\*.*$/gm, '')
       .trim();
-    if (!withoutBlocks) return ''; // all content was *-lines (system prompt echo) — signal garbage to caller
+    if (!withoutBlocks) return '';
     const sentences = withoutBlocks.split(/(?<=[.!?])\s+/).filter((s) => s.trim().length > 15);
     if (sentences.length > 0) return sentences.slice(0, 3).join(' ').trim();
   }
