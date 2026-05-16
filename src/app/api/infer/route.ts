@@ -11,6 +11,8 @@ const INSTRUCTION_SIGNALS = [
   'consult a doctor', 'seek professional advice', 'Direct and confident', 'TONE:',
   'Final Answer:', '* Role:', '* Constraints:', '* User:', '* Self-Correction:',
   '* Option 1:', '* Option 2:', 'Max 3 sentences?', 'Start immediately?',
+  // Model sometimes echoes system rules as self-check questions
+  'direct answer in', '1-3 sentences', 'sign-offs', 'no greetings', 'no disclaimer',
 ];
 
 // Line-start patterns that signal the model is narrating its own reasoning, not answering

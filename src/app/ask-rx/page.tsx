@@ -57,6 +57,35 @@ const SUGGESTED = [
 ];
 
 
+// Detect when the user wants to find/buy a specific medicine — skip AI consultation
+function extractConnectRequest(text: string): Medicine | null {
+  const t = text.trim();
+  if (/\?/.test(t)) return null; // questions → consultation
+  if (/^(what|how|why|when|is|are|can|could|should|does|do|will|would)\b/i.test(t)) return null;
+  if (/\bi\s+need\s+something\s+(for|to)\b/i.test(t)) return null; // "I need something for X" → consult
+
+  const triggers = [
+    /\b(?:find(?:\s+me)?|search(?:\s+for)?|looking\s+for|get\s+me|who\s+has|where\s+can\s+i\s+(?:get|find|buy))\s+(.+)/i,
+    /\bi\s+(?:need|want)\s+to\s+(?:buy|get|order|purchase)\s+(.+)/i,
+    /\bi\s+(?:need|want)\s+(?!something[\s,]|to\s)(.+)/i,
+  ];
+
+  for (const re of triggers) {
+    const match = t.match(re);
+    if (!match) continue;
+    let name = match[1]
+      .replace(/\s+near\s+me\s*$/i, '')
+      .replace(/\s+(?:in|at|from|around)\s+.*$/i, '')
+      .replace(/\s+please\s*$/i, '')
+      .trim();
+    if (/\b(something|anything|medicine|drug|medication|help|advice|info(?:rmation)?)\b/i.test(name)) continue;
+    if (name.length < 2) continue;
+    name = name.charAt(0).toUpperCase() + name.slice(1);
+    return { name, strength: '', form: '', quantity: 0 };
+  }
+  return null;
+}
+
 // Camera/scan intent detection
 function isScanRequest(text: string): boolean {
   return /\b(scan|photo|picture|snap|camera|photograph)\b/i.test(text)
@@ -299,6 +328,12 @@ export default function NexusPage() {
     // Text path: stream the response so text appears immediately
     if (isScanRequest(messageText)) {
       addMsg({ role: 'ai', text: 'Tap the camera icon below to scan your prescription or medicine.' });
+      return;
+    }
+
+    const connectMed = extractConnectRequest(messageText);
+    if (connectMed) {
+      addMsg({ role: 'detail_form', text: '', pendingMedicines: [connectMed] });
       return;
     }
 
