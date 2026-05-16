@@ -502,37 +502,13 @@ Category:`;
     }
 
     const validation = validateResponse(clean, 'askrx');
-
     if (!validation.passed) {
       logFailure({ feature: 'askrx', patterns: validation.patterns, trigger: message, bad_output_sample: clean, auto_detected: true });
-
-      // Only retry on thinking_leak still present after stripping.
-      // double_response is already fixed by deduplicateResponse; excessive_length is non-critical.
-      const isCritical = validation.patterns.includes('thinking_leak');
-      if (isCritical) {
-        nexusLogger.emit('SYSTEM', `🛡️ Safety: ${validation.patterns.join(' + ')} detected — retrying...`);
-        try {
-          const retrySystem = buildRetrySystemPrompt(systemPrompt, validation.patterns);
-          const retryResponse = await this.infer(prompt, {
-            systemPrompt: retrySystem, temperature: 0.3, maxTokens: 150,
-            allowEdgeFallback: true, edgeSystemPrompt: ASKRX_EDGE_SYSTEM,
-          });
-          const retryClean = stripSystemLeaks(stripThinking(retryResponse));
-          if (retryClean.length >= 5) {
-            const retryValidation = validateResponse(retryClean, 'askrx');
-            // Only use retry if it resolved the thinking leak — otherwise fall back to original
-            if (!retryValidation.patterns.includes('thinking_leak')) {
-              logCorrectionResult(retryValidation.passed, 'askrx', validation.patterns);
-              return { text: retryClean, flagged: !retryValidation.passed, patternsDetected: validation.patterns, corrected: true };
-            }
-          }
-        } catch { /* fall through */ }
-        logCorrectionResult(false, 'askrx', validation.patterns);
-      }
-      return { text: clean, flagged: true, patternsDetected: validation.patterns, corrected: false };
+      // Server-side filter + stripThinking already prevented thinking from reaching here.
+      // Remaining flags (excessive_length, disclaimer) are non-critical — show as-is, no retry.
     }
 
-    return { text: clean, flagged: false, patternsDetected: [], corrected: false };
+    return { text: clean, flagged: !validation.passed, patternsDetected: validation.patterns, corrected: false };
   }
 
   // ── Voice Transcript Correction ──
