@@ -109,23 +109,11 @@ function detectDoubleResponse(text: string): boolean {
 
 function detectThinkingLeak(text: string): boolean {
   return (
-    // Inline asterisk thinking: *Wait, *Final, *Let me, etc. — never in clean responses
-    /\*(?:Wait|Final|Let me|Actually|I'll|The prompt|Hmm|Note that)/i.test(text) ||
-    // Line starting with asterisk = reasoning block
-    /^\s*\*/m.test(text) ||
     /<think>/i.test(text) ||
     /\blet me (think|reconsider|analyze|check|verify|rephrase|approach)\b/i.test(text) ||
     /\bi need to consider\b/i.test(text) ||
     /^step \d+:/im.test(text) ||
-    /\bfirst,? let'?s\b/i.test(text) ||
-    // Self-evaluation: Gemma verifying its own compliance mid-response
-    /\btotal sentences:/i.test(text) ||
-    /\bstarts immediately:/i.test(text) ||
-    /\bno disclaimers:/i.test(text) ||
-    /\bno greetings:/i.test(text) ||
-    // "Wait," followed by clear reasoning context (not "wait time" / "wait until")
-    /\bwait,?\s+(?:actually|the prompt|let me|i'll|i should|but i)\b/i.test(text) ||
-    /(?:\d+\.\s+){2,}[A-Z]/.test(text)
+    /\bfirst,? let'?s\b/i.test(text)
   );
 }
 

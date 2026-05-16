@@ -24,6 +24,14 @@ Connectivity gaps exist everywhere. Nexus solves this by integrating **Gemma 4 E
 - **Zero-Network Mode:** When offline, the app seamlessly switches from cloud inference (26B) to on-device inference (E2B).
 - **On-Device Vision:** Patients can scan prescriptions and get medicine guidance even in "Airplane Mode," ensuring healthcare access is never blocked by a poor connection.
 
+## 🛡️ Safety & Trust Layer (Autonomous Monitoring)
+
+Healthcare AI requires a higher standard of trust. Nexus includes a custom safety layer (`nexus-safety.ts`) that monitors every AI output in real-time.
+
+- **Chain-of-Thought Guard:** Automatically detects and prunes internal reasoning leaks, ensuring the patient sees only direct, professional advice.
+- **Autonomous Self-Correction:** If the safety layer detects a failure pattern (double responses, "thinking leaks," or liability disclaimers), the Brain automatically triggers a **re-inference** with specific safety rules to fix the response before it reaches the user.
+- **Failure Tracking:** A persistent log of AI hallucinations and pattern failures is maintained to drive continuous improvement of the system prompts.
+
 ## 🚀 Key Features
 
 1. **AskRX:** Multilingual AI pharmacist — dosage, interactions, side effects in 9 languages (EN, FR, ES, AR, PT, Swahili, Yoruba, Igbo, Hausa).

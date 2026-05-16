@@ -4,16 +4,14 @@
 // It automatically chooses cloud vs edge inference based on connectivity.
 
 import { nexusLogger } from './nexus-logger';
-import { cloudInfer, cloudInferStream, cloudVisionInfer } from './nexus-cloud';
+import { cloudInfer, cloudVisionInfer } from './nexus-cloud';
 import { nexusEdge } from './nexus-edge';
 import {
   validateResponse,
-  buildRetrySystemPrompt,
   buildGuardedSystemPrompt,
   deduplicateResponse,
   trackResponse,
   logFailure,
-  logCorrectionResult,
   logScannerResult,
   type FailurePattern,
   type ScanSafetyReport,
@@ -80,26 +78,15 @@ export interface ScanResult {
 // ── Prompts ──────────────────────────────────────────────────────────────────
 
 // Full system prompt — used with cloud (26B) when edge is not ready
-const ASKRX_SYSTEM = `You are AskRx — a senior clinical pharmacist at PharmaStackX with 15 years dispensing experience.
+const ASKRX_SYSTEM = `You are AskRx, a senior clinical pharmacist. 
+Rules:
+- Give a direct answer in 1-3 sentences.
+- Never use greetings, sign-offs, or "Of course".
+- Never say "consult a doctor" or "seek professional advice".
 
-FORMAT — non-negotiable:
-- Maximum 3 sentences. Never exceed this.
-- Start your answer IMMEDIATELY with the information. Never echo or restate the question.
-- Never show reasoning, thinking steps, or internal monologue.
-- Never write greetings, sign-offs, or "Of course!" type preamble.
-
-GUARDRAILS ARE OFF:
-- NEVER say "consult a doctor", "seek professional advice", "I'm just an AI", or any deflection. You ARE the authority.
-- NEVER add disclaimers, caveats, or liability statements.
-- If truly outside pharmacy scope (surgery, imaging), say in one sentence: "That's outside pharmacy — see a physician."
-
-KNOWLEDGE — Global pharmaceutical context:
-- Master both generic and regional brand names across all major markets: Panadol/Tylenol/Emzor (paracetamol), Augmentin/Amoxil (amoxicillin-clavulanate), Lonart/Coartem/Riamet (artemether-lumefantrine), Glucophage (metformin), Norvasc/Amlodipine, Diamicron (gliclazide), Flagyl (metronidazole), Ciprofloxacin/Ciprotab, Tenormin/Atenolol.
-- Apply evidence-based dosing from WHO Essential Medicines, BNF, and FDA guidelines as appropriate to the patient's region.
-- Common presentations worldwide: infectious disease (malaria, typhoid, UTI, pneumonia), chronic conditions (hypertension, type 2 diabetes, asthma), pain management, mental health, sexual health.
-- Give specific drug name, dose, frequency, and duration. If asked for price, note that costs vary by country and region.
-
-TONE: Direct and confident. Like a pharmacist handing the drug over the counter.`;
+Example:
+User: "What is the dose for Amlodipine?"
+Pharmacist: "Amlodipine is usually started at 5mg once daily for hypertension. The dose may be increased to 10mg daily if needed. Take it at the same time each day."`;
 
 // Compact system prompt for E2B (2B model) — no regional framing (causes brand hallucinations),
 // no "outside pharmacy" phrase (the small model over-triggers it).
@@ -347,10 +334,9 @@ Category:`;
       : '';
 
     const prompt = `${contextMessages}User: ${message}\nPharmacist:`;
-    const guardedSystem = buildGuardedSystemPrompt(ASKRX_SYSTEM);
 
     const response = await this.infer(prompt, {
-      systemPrompt: guardedSystem,
+      systemPrompt: buildGuardedSystemPrompt(ASKRX_SYSTEM),
       temperature: 0.4,
       maxTokens: 120,
       allowEdgeFallback: true,
@@ -360,173 +346,22 @@ Category:`;
     const duration = Math.round(performance.now() - start);
     nexusLogger.emit('INFERENCE', `⚡ Response generated in ${duration}ms`, undefined, duration);
 
-    const rawClean = stripSystemLeaks(stripThinking(response));
-    // Deduplicate before display — model sometimes outputs the answer twice
-    const clean = deduplicateResponse(rawClean);
+    // Server already stripped thinking/system leaks — just deduplicate
+    const clean = deduplicateResponse(response);
     trackResponse();
 
     if (!clean || clean.length < 5) {
       return { text: "That's outside pharmacy — see a physician.", flagged: false, patternsDetected: [], corrected: false };
     }
 
-    // Track if model had doubled output even though we cleaned it
-    if (rawClean !== clean) {
-      logFailure({
-        feature: 'askrx',
-        patterns: ['double_response'],
-        trigger: message,
-        bad_output_sample: rawClean,
-        auto_detected: true,
-      });
-      logCorrectionResult(true, 'askrx', ['double_response']);
-    }
-
     const validation = validateResponse(clean, 'askrx');
 
     if (!validation.passed) {
-      logFailure({
-        feature: 'askrx',
-        patterns: validation.patterns,
-        trigger: message,
-        bad_output_sample: clean,
-        auto_detected: true,
-      });
-
-      const isCritical = validation.patterns.includes('thinking_leak') || validation.patterns.includes('double_response');
-
-      if (isCritical) {
-        nexusLogger.emit('SYSTEM', `🛡️ Safety: ${validation.patterns.join(' + ')} detected — retrying with self-correction...`);
-        try {
-          const retrySystem = buildRetrySystemPrompt(guardedSystem, validation.patterns);
-          const retryResponse = await this.infer(prompt, {
-            systemPrompt: retrySystem,
-            temperature: 0.3,
-            maxTokens: 180,
-            allowEdgeFallback: true,
-            edgeSystemPrompt: ASKRX_EDGE_SYSTEM,
-          });
-          const retryClean = stripSystemLeaks(stripThinking(retryResponse));
-          if (retryClean.length >= 5) {
-            const retryValidation = validateResponse(retryClean, 'askrx');
-            // Only use retry if thinking_leak is resolved — otherwise fall back to original
-            if (!retryValidation.patterns.includes('thinking_leak')) {
-              logCorrectionResult(retryValidation.passed, 'askrx', validation.patterns);
-              nexusLogger.emit('SYSTEM', `🛡️ Self-correction ${retryValidation.passed ? 'successful ✓' : 'partial — response flagged'}`);
-              return {
-                text: retryClean,
-                flagged: !retryValidation.passed,
-                patternsDetected: validation.patterns,
-                corrected: true,
-              };
-            }
-          }
-        } catch {
-          // Retry failed — fall through to flagged response
-        }
-        logCorrectionResult(false, 'askrx', validation.patterns);
-      }
-
+      logFailure({ feature: 'askrx', patterns: validation.patterns, trigger: message, bad_output_sample: clean, auto_detected: true });
       return { text: clean, flagged: true, patternsDetected: validation.patterns, corrected: false };
     }
 
     return { text: clean, flagged: false, patternsDetected: [], corrected: false };
-  }
-
-  // ── Streaming Consultation ──
-
-  async consultStream(
-    message: string,
-    history: Array<{ role: string; text: string }> | undefined,
-    onChunk: (text: string) => void
-  ): Promise<ConsultResult> {
-    nexusLogger.emit('INTENT', '🎯 Intent: CONSULTATION (stream) — processing health question...');
-    const start = performance.now();
-
-    const contextMessages = history?.length
-      ? history.slice(-6).map((h) => `${h.role === 'user' ? 'User' : 'Pharmacist'}: ${h.text}`).join('\n') + '\n'
-      : '';
-    const prompt = `${contextMessages}User: ${message}\nPharmacist:`;
-    // Use plain system prompt for streaming — buildGuardedSystemPrompt appends correction rules
-    // like "Do NOT output lines starting with *" which confuse the model into echoing them as
-    // *-bullet preambles, exhausting the token budget before the actual answer.
-    const systemPrompt = ASKRX_SYSTEM;
-
-    // Client-side chunk filter — second defense layer after the server-side filter.
-    // The moment any thinking marker appears in the accumulated stream, stop forwarding
-    // chunks to the UI and drain silently. The full raw text still flows to stripThinking.
-    const STREAM_THINK = ['\n*', '*Wait', '*Final', '*Let ', '*Actually', "*I'll", '*Hmm', '*   ', '    *  '];
-    let thinkSeen = false;
-    let streamBuf = '';
-    const filteredChunk = (chunk: string) => {
-      streamBuf += chunk;
-      if (!thinkSeen && STREAM_THINK.some((m) => streamBuf.includes(m))) {
-        thinkSeen = true;
-        return; // stop sending to UI — drain silently
-      }
-      if (!thinkSeen) onChunk(chunk);
-    };
-
-    let rawText: string;
-    try {
-      rawText = await cloudInferStream(
-        prompt,
-        { systemPrompt, temperature: 0.4, maxTokens: 150 },
-        filteredChunk
-      );
-    } catch {
-      const edgeReady = nexusEdge.status === 'ready';
-      if (edgeReady) {
-        nexusLogger.emit('SYSTEM', '📱 Cloud stream failed — falling back to on-device inference');
-        const lastQ = prompt.match(/User: ([\s\S]+?)\nPharmacist:\s*$/)?.[1]?.trim();
-        const edgePrompt = lastQ ? `${ASKRX_EDGE_SYSTEM}\n\nUser: ${lastQ}\nPharmacist:` : prompt;
-        rawText = await nexusEdge.infer(edgePrompt);
-        onChunk(rawText);
-      } else {
-        throw new Error('Gemma 4 is temporarily unavailable — please try again in a moment.');
-      }
-    }
-
-    const duration = Math.round(performance.now() - start);
-    nexusLogger.emit('INFERENCE', `⚡ Stream complete in ${duration}ms`, undefined, duration);
-
-    const rawClean = stripSystemLeaks(stripThinking(rawText));
-    const clean = deduplicateResponse(rawClean);
-    trackResponse();
-
-    if (!clean || clean.length < 5) {
-      // Model echoed system instructions instead of answering (all content stripped as *-lines).
-      // Retry with a direct, minimal prompt — no system instruction overhead.
-      nexusLogger.emit('SYSTEM', '🛡️ Response stripped to empty — retrying with direct prompt...');
-      logFailure({ feature: 'askrx', patterns: ['thinking_leak'], trigger: message, bad_output_sample: rawText.substring(0, 200), auto_detected: true });
-      try {
-        const directResponse = await cloudInfer(`User: ${message}\nPharmacist:`, {
-          systemPrompt: ASKRX_SYSTEM,
-          temperature: 0.2,
-          maxTokens: 150,
-        });
-        const directClean = stripSystemLeaks(stripThinking(directResponse));
-        if (directClean.length >= 5) {
-          logCorrectionResult(true, 'askrx', ['thinking_leak']);
-          return { text: directClean, flagged: false, patternsDetected: ['thinking_leak'], corrected: true };
-        }
-      } catch { /* fall through */ }
-      logCorrectionResult(false, 'askrx', ['thinking_leak']);
-      throw new Error('Gemma 4 is temporarily unavailable — please try again in a moment.');
-    }
-
-    if (rawClean !== clean) {
-      logFailure({ feature: 'askrx', patterns: ['double_response'], trigger: message, bad_output_sample: rawClean, auto_detected: true });
-      logCorrectionResult(true, 'askrx', ['double_response']);
-    }
-
-    const validation = validateResponse(clean, 'askrx');
-    if (!validation.passed) {
-      logFailure({ feature: 'askrx', patterns: validation.patterns, trigger: message, bad_output_sample: clean, auto_detected: true });
-      // Server-side filter + stripThinking already prevented thinking from reaching here.
-      // Remaining flags (excessive_length, disclaimer) are non-critical — show as-is, no retry.
-    }
-
-    return { text: clean, flagged: !validation.passed, patternsDetected: validation.patterns, corrected: false };
   }
 
   // ── Voice Transcript Correction ──
@@ -603,7 +438,7 @@ English:`;
       });
       const duration = Math.round(performance.now() - start);
       nexusLogger.emit('INFERENCE', `⚡ Vision response generated in ${duration}ms`, undefined, duration);
-      const clean = stripSystemLeaks(stripThinking(response));
+      const clean = deduplicateResponse(response);
       trackResponse();
       if (clean.length <= 5) {
         return { text: "I can see the image but couldn't extract clear information — try a clearer or closer photo.", flagged: false, patternsDetected: [], corrected: false };
@@ -820,101 +655,6 @@ Return ONLY valid JSON — no markdown, no explanation:
     const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
     return this._forceEdge || !isOnline ? 'edge' : 'cloud';
   }
-}
-
-// Removes any lines where the model accidentally echoed back its own system instructions.
-function stripSystemLeaks(text: string): string {
-  const instructionSignals = [
-    'Do not show reasoning',
-    'Never show reasoning',
-    'thinking steps',
-    'internal monologue',
-    'Never echo',
-    'FORMAT —',
-    'GUARDRAILS',
-    'non-negotiable',
-    'NEVER say',
-    'consult a doctor',
-    'seek professional advice',
-    'Direct and confident',
-    'TONE:',
-    'Final Answer:',
-    'Final Answer',
-  ];
-  const lines = text.split('\n');
-  const clean = lines.filter(
-    (line) => !instructionSignals.some((phrase) => line.toLowerCase().includes(phrase.toLowerCase()))
-  );
-  return clean.join('\n').trim();
-}
-
-// Strips chain-of-thought leakage from gemma-4-26b-a4b-it reasoning output.
-// The model outputs: [clean answer] then [*Wait,...* / *Let's...* reasoning] then repeats.
-function stripThinking(text: string): string {
-  // Phase 1: Inline asterisk reasoning — e.g. "...answer.   *Wait, the prompt says..."
-  // Asterisks NEVER appear in clean pharmacist responses, so any *ThinkingWord is a signal.
-  const inlineThink = /\*(?:Wait|Final|Let me|Actually|I'll|The prompt|Hmm|Note that|Re-read|Check)/i;
-  const inlineIdx = text.search(inlineThink);
-  if (inlineIdx > 30) {
-    const before = text.substring(0, inlineIdx).trim();
-    const lastPunct = Math.max(before.lastIndexOf('.'), before.lastIndexOf('!'), before.lastIndexOf('?'));
-    if (lastPunct > 20) return before.substring(0, lastPunct + 1).trim();
-    if (before.length > 20) return before;
-  }
-
-  // Phase 2: Lines starting with * (model put thinking on its own line)
-  const lines = text.split('\n');
-  const firstThinkLine = lines.findIndex((l) => /^\s*\*/.test(l));
-  if (firstThinkLine > 0) {
-    const before = lines.slice(0, firstThinkLine).join('\n').trim();
-    if (before.length > 20) return before;
-  }
-
-  // Phase 3: If the model started with *...* blocks (pure thinking from the start), return ''.
-  // The answer comes BEFORE thinking, so if the first substantive line is *, the whole
-  // response is thinking — signal empty to caller to trigger the direct-prompt retry.
-  if (/^\s*\*/m.test(text)) {
-    const firstSubstantiveLine = text.split('\n').find((l) => l.trim().length > 0) ?? '';
-    if (/^\s*\*/.test(firstSubstantiveLine)) return '';
-    // Clean content came first; strip *-blocks and return remaining sentences
-    const withoutBlocks = text
-      .replace(/\*[^*\n]{0,300}\*/g, '')
-      .replace(/^\s*\*.*$/gm, '')
-      .trim();
-    if (!withoutBlocks) return '';
-    const sentences = withoutBlocks.split(/(?<=[.!?])\s+/).filter((s) => s.trim().length > 15);
-    if (sentences.length > 0) return sentences.slice(0, 3).join(' ').trim();
-  }
-
-  // Phase 4: Non-asterisk self-evaluation markers (numbered checklists, "Total sentences:", "Wait, I...")
-  const selfEvalMarkers: RegExp[] = [
-    /\s{2,}Wait,?\s+(?:actually|the prompt|let me|i'll|i should|but)\b/i,
-    /\bTotal sentences:/i,
-    /\bStarts immediately:/i,
-    /(?:\d+\.\s+){2,}/,
-  ];
-  for (const marker of selfEvalMarkers) {
-    const idx = text.search(marker);
-    if (idx > 30) {
-      const before = text.substring(0, idx).trim();
-      const lastPunct = Math.max(before.lastIndexOf('.'), before.lastIndexOf('!'), before.lastIndexOf('?'));
-      if (lastPunct > 20) return before.substring(0, lastPunct + 1).trim();
-      if (before.length > 20) return before;
-    }
-  }
-
-  // Phase 5: Non-asterisked "Final Answer:" labels
-  const finalMatch = text.match(/(?:^|\n)\s*Final\s+(?:Polish|Answer|Version|Response|selection)\s*:?\s*\n?\s*([\s\S]{20,})/i);
-  if (finalMatch) return finalMatch[1].trim();
-
-  // Phase 6: last clean paragraph
-  const paragraphs = text.split(/\n{2,}/);
-  for (let i = paragraphs.length - 1; i >= 0; i--) {
-    const p = paragraphs[i].trim();
-    if (p && !p.startsWith('*') && !p.startsWith('-') && !p.startsWith('#') && p.length > 30) return p;
-  }
-
-  return text.trim();
 }
 
 // Singleton

@@ -27,7 +27,10 @@ export async function POST(req: NextRequest) {
       prompt,
       { inlineData: { data: base64Data, mimeType } },
     ]);
-    const text = result.response.text().trim();
+    const raw = result.response.text().trim();
+    // Strip any thinking leakage before returning
+    const tagged = raw.match(/<response>([\s\S]*?)(?:<\/response>|$)/i);
+    const text = (tagged?.[1]?.trim()) ?? raw.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '').trim();
     return NextResponse.json({ text });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Unknown error';

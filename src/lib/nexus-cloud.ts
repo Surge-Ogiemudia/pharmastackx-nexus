@@ -71,43 +71,6 @@ export async function cloudInfer(prompt: string, options?: CloudInferOptions): P
   throw new Error('Gemma 4 cloud unavailable');
 }
 
-export async function cloudInferStream(
-  prompt: string,
-  options: CloudInferOptions | undefined,
-  onChunk: (text: string) => void
-): Promise<string> {
-  const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(), 45_000);
-  try {
-    const res = await fetch('/api/infer-stream', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, options }),
-      signal: abort.signal,
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(`[${res.status}] ${err.error ?? res.statusText}`);
-    }
-    if (!res.body) throw new Error('No response body');
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let accumulated = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value, { stream: true });
-      accumulated += chunk;
-      onChunk(chunk);
-    }
-    clearTimeout(timer);
-    return accumulated;
-  } catch (err) {
-    clearTimeout(timer);
-    throw err;
-  }
-}
-
 export async function cloudVisionInfer(
   prompt: string,
   imageBase64: string,

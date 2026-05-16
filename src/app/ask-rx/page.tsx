@@ -103,7 +103,6 @@ export default function NexusPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [streaming, setStreaming] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [attachedImage, setAttachedImage] = useState<{ base64: string; mimeType: string; preview: string } | null>(null);
@@ -243,22 +242,13 @@ export default function NexusPage() {
       .map((m) => ({ role: m.role === 'user' ? 'user' : 'model', text: m.text }));
 
     setLoading(true);
-    setStreaming(true);
-    const aiMsgId = `ai_${Date.now()}_${Math.random()}`;
-    setMessages((prev) => [...prev, { id: aiMsgId, role: 'ai', text: '', timestamp: new Date() }]);
-
     try {
-      let spinnerCleared = false;
-      const result: ConsultResult = await brain.consultStream(query, history, (chunk) => {
-        if (!spinnerCleared) { spinnerCleared = true; setLoading(false); }
-        setMessages((prev) => prev.map((m) => m.id === aiMsgId ? { ...m, text: m.text + chunk } : m));
-      });
-      setMessages((prev) => prev.map((m) => m.id === aiMsgId ? { ...m, text: result.text, flagged: result.flagged, patternsDetected: result.patternsDetected } : m));
+      const result: ConsultResult = await brain.consult(query, history);
+      addMsg({ role: 'ai', text: result.text, flagged: result.flagged, patternsDetected: result.patternsDetected });
     } catch {
-      setMessages((prev) => prev.map((m) => m.id === aiMsgId ? { ...m, text: 'Could not connect. Please try again.', isError: true, failedQuery: query } : m));
+      addMsg({ role: 'ai', text: 'Could not connect. Please try again.', isError: true, failedQuery: query });
     } finally {
       setLoading(false);
-      setStreaming(false);
     }
   };
 
@@ -267,7 +257,7 @@ export default function NexusPage() {
     const messageText = text ?? input.trim();
     const image = attachedImage;
     if (!messageText && !image) return;
-    if (loading || streaming) return;
+    if (loading) return;
 
     addMsg({ role: 'user', text: messageText, imagePreview: image?.preview });
     setInput('');
@@ -315,49 +305,19 @@ export default function NexusPage() {
     const consultHistory = messages.filter((m) => m.role === 'user' || m.role === 'ai').slice(-6)
       .map((m) => ({ role: m.role === 'user' ? 'user' : 'model', text: m.text }));
 
-    // Show thinking spinner; streaming=true blocks new sends during stream
     setLoading(true);
-    setStreaming(true);
-
-    // Pre-add an empty AI message to stream into
-    const aiMsgId = `ai_${Date.now()}_${Math.random()}`;
-    setMessages((prev) => [...prev, { id: aiMsgId, role: 'ai', text: '', timestamp: new Date() }]);
 
     try {
-      let spinnerCleared = false;
-
-      const consultResult = await brain.consultStream(messageText, consultHistory, (chunk) => {
-        if (!spinnerCleared) { spinnerCleared = true; setLoading(false); }
-        setMessages((prev) =>
-          prev.map((m) => m.id === aiMsgId ? { ...m, text: m.text + chunk } : m)
-        );
-      });
-
-      // Extract medicine names from the clean final text — instant, no API call
+      const consultResult = await brain.consult(messageText, consultHistory);
       const medicines = extractMedicinesFromResponse(consultResult.text);
       const suggestedAction: SuggestedAction | undefined = medicines.length > 0
         ? { type: 'find_medicine', medicines, originalQuery: messageText }
         : undefined;
-
-      // Replace streamed (possibly dirty) text with safety-cleaned version + button
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === aiMsgId
-            ? { ...m, text: consultResult.text, flagged: consultResult.flagged, patternsDetected: consultResult.patternsDetected, suggestedAction }
-            : m
-        )
-      );
+      addMsg({ role: 'ai', text: consultResult.text, flagged: consultResult.flagged, patternsDetected: consultResult.patternsDetected, suggestedAction });
     } catch {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === aiMsgId
-            ? { ...m, text: 'Connection dropped — Gemma couldn\'t be reached. Tap Retry to try again.', isError: true, failedQuery: messageText }
-            : m
-        )
-      );
+      addMsg({ role: 'ai', text: 'Connection dropped — Gemma couldn\'t be reached. Tap Retry to try again.', isError: true, failedQuery: messageText });
     } finally {
       setLoading(false);
-      setStreaming(false);
     }
   };
 
@@ -447,7 +407,7 @@ export default function NexusPage() {
           ))}
         </AnimatePresence>
 
-        {(loading || streaming) && (
+        {loading && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
               <Avatar sx={{ width: 32, height: 32, bgcolor: 'rgba(0,229,160,0.15)' }}>
@@ -456,7 +416,7 @@ export default function NexusPage() {
               <Box sx={{ px: 2, py: 1.5, borderRadius: '4px 16px 16px 16px', bgcolor: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: 1 }}>
                 <CircularProgress size={14} sx={{ color: '#00E5A0' }} />
                 <Typography variant="body2" sx={{ color: '#64748B', fontSize: '0.8rem' }}>
-                  {loading ? 'Gemma 4 is thinking…' : 'Writing…'}
+                  Gemma 4 is thinking…
                 </Typography>
               </Box>
             </Box>
@@ -506,7 +466,7 @@ export default function NexusPage() {
             placeholder={transcribing ? 'Gemma 4 is correcting medical terms...' : recording ? 'Listening…' : 'Ask anything, or say what medicine you need…'}
             value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown}
             variant="standard" slotProps={{ input: { disableUnderline: true, sx: { color: '#E0F2F1', fontSize: '0.9rem' } } }} sx={{ flex: 1 }} />
-          <IconButton onClick={() => sendMessage()} disabled={(!input.trim() && !attachedImage) || loading || streaming}
+          <IconButton onClick={() => sendMessage()} disabled={(!input.trim() && !attachedImage) || loading}
             sx={{ color: (input.trim() || attachedImage) ? '#00E5A0' : '#475569', '&:hover': { color: '#4ADE80' }, flexShrink: 0 }}>
             <SendIcon />
           </IconButton>
