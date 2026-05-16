@@ -451,12 +451,27 @@ Category:`;
     // *-bullet preambles, exhausting the token budget before the actual answer.
     const systemPrompt = ASKRX_SYSTEM;
 
+    // Client-side chunk filter — second defense layer after the server-side filter.
+    // The moment any thinking marker appears in the accumulated stream, stop forwarding
+    // chunks to the UI and drain silently. The full raw text still flows to stripThinking.
+    const STREAM_THINK = ['\n*', '*Wait', '*Final', '*Let ', '*Actually', "*I'll", '*Hmm', '*   ', '    *  '];
+    let thinkSeen = false;
+    let streamBuf = '';
+    const filteredChunk = (chunk: string) => {
+      streamBuf += chunk;
+      if (!thinkSeen && STREAM_THINK.some((m) => streamBuf.includes(m))) {
+        thinkSeen = true;
+        return; // stop sending to UI — drain silently
+      }
+      if (!thinkSeen) onChunk(chunk);
+    };
+
     let rawText: string;
     try {
       rawText = await cloudInferStream(
         prompt,
         { systemPrompt, temperature: 0.4, maxTokens: 150 },
-        onChunk
+        filteredChunk
       );
     } catch {
       const edgeReady = nexusEdge.status === 'ready';
