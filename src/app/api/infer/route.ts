@@ -13,6 +13,12 @@ const INSTRUCTION_SIGNALS = [
   '* Option 1:', '* Option 2:', 'Max 3 sentences?', 'Start immediately?',
 ];
 
+// Line-start patterns that signal the model is narrating its own reasoning, not answering
+const REASONING_STARTS = [
+  "let's ", "i'll ", "let me ", "i will ", "i should ", "going with", "i'm going",
+  "so the answer", "so my answer", "the answer is", "my answer",
+];
+
 function clean(raw: string): string {
   // Use <response> tags if model provided them
   const tagged = raw.match(/<response>([\s\S]*?)(?:<\/response>|$)/i);
@@ -21,21 +27,27 @@ function clean(raw: string): string {
   // Strip <thinking> blocks
   let text = raw.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
 
-  // Filter out reasoning lines — any line that starts with * (model analysis/bullets)
-  // or that echoes system instructions. Pharmacist answers are always prose, never bullets.
+  // Filter out reasoning lines — bullets, echoed instructions, or model self-commentary.
   text = text.split('\n')
     .filter(line => {
       const t = line.trim();
       if (!t) return false;
       if (t.startsWith('*')) return false;
-      return !INSTRUCTION_SIGNALS.some(sig => t.toLowerCase().includes(sig.toLowerCase()));
+      const lower = t.toLowerCase();
+      if (REASONING_STARTS.some(p => lower.startsWith(p))) return false;
+      return !INSTRUCTION_SIGNALS.some(sig => lower.includes(sig.toLowerCase()));
     })
     .join('\n')
     .trim();
 
+  // Strip quote characters the model uses to wrap its response (e.g. leading/trailing ")
+  text = text.replace(/^["'"]+\s*/, '').replace(/\s*["'"]+$/, '');
+
   // Take sentences until we hit a near-duplicate (model outputting a revised version of its answer).
   // Words >4 chars are the signal — filler words like "the", "and" are ignored.
-  const sentences = text.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 10);
+  const sentences = text.split(/(?<=[.!?])\s+/)
+    .map(s => s.replace(/^["'"]+\s*/, '').trim())
+    .filter(s => s.length > 10);
   const result: string[] = [];
   const seenWords = new Set<string>();
   for (const s of sentences) {
