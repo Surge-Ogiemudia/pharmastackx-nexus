@@ -20,8 +20,21 @@ import CancelIcon from '@mui/icons-material/Cancel';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import NotificationsIcon from '@mui/icons-material/Notifications';
+import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { DispatchRequest } from '@/lib/dispatch-store';
+
+type NotifStatus = 'idle' | 'requesting' | 'active' | 'denied' | 'unsupported';
+
+function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const arr = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i++) arr[i] = rawData.charCodeAt(i);
+  return arr.buffer;
+}
 
 const MY_ID = 'psx-pharmacist';
 const MY_NAME = 'PharmaStackX Hub';
@@ -45,6 +58,57 @@ export default function PharmacistPage() {
   const [responding, setResponding] = useState<RespondingState | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [loading, setLoading] = useState(false);
+  const [notifStatus, setNotifStatus] = useState<NotifStatus>('idle');
+
+  // Register SW and restore existing subscription on mount
+  useEffect(() => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      setNotifStatus('unsupported');
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      setNotifStatus('denied');
+      return;
+    }
+    navigator.serviceWorker.register('/sw.js')
+      .then((reg) => reg.pushManager.getSubscription())
+      .then((sub) => {
+        if (sub) {
+          // Re-post to server in case it restarted since last visit
+          fetch('/api/push-subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(sub),
+          });
+          setNotifStatus('active');
+        }
+      })
+      .catch(console.error);
+  }, []);
+
+  const enableNotifications = useCallback(async () => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    setNotifStatus('requesting');
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') { setNotifStatus('denied'); return; }
+      const reg = await navigator.serviceWorker.register('/sw.js');
+      await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!),
+      });
+      await fetch('/api/push-subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sub),
+      });
+      setNotifStatus('active');
+    } catch (err) {
+      console.error('[push-subscribe]', err);
+      setNotifStatus('idle');
+    }
+  }, []);
 
   const fetchRequests = useCallback(async () => {
     try {
@@ -152,7 +216,71 @@ export default function PharmacistPage() {
         )}
       </Box>
 
-      <Box sx={{ flex: 1, overflow: 'auto', p: 3, display: 'flex', flexDirection: 'column', gap: 3 }}>
+      {/* Notification status bar */}
+      {notifStatus !== 'unsupported' && (
+        <Box
+          sx={{
+            px: 3,
+            py: 0.85,
+            borderBottom: '1px solid rgba(255,255,255,0.04)',
+            bgcolor: 'rgba(10,15,28,0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            flexShrink: 0,
+          }}
+        >
+          {notifStatus === 'active' ? (
+            <Chip
+              icon={<NotificationsActiveIcon style={{ fontSize: 13, color: '#00E5A0' }} />}
+              label="Push notifications active — OS alert fires on every new request"
+              size="small"
+              sx={{
+                bgcolor: 'rgba(0,229,160,0.07)',
+                border: '1px solid rgba(0,229,160,0.2)',
+                color: '#00E5A0',
+                fontSize: '0.68rem',
+                height: 24,
+                '& .MuiChip-label': { pl: 0.5 },
+              }}
+            />
+          ) : notifStatus === 'denied' ? (
+            <Chip
+              icon={<NotificationsIcon style={{ fontSize: 13, color: '#64748B' }} />}
+              label="Notifications blocked — enable in browser site settings"
+              size="small"
+              sx={{
+                bgcolor: 'transparent',
+                border: '1px solid rgba(100,116,139,0.2)',
+                color: '#64748B',
+                fontSize: '0.68rem',
+                height: 24,
+                '& .MuiChip-label': { pl: 0.5 },
+              }}
+            />
+          ) : (
+            <Chip
+              icon={<NotificationsIcon style={{ fontSize: 13, color: '#FBBF24' }} />}
+              label={notifStatus === 'requesting' ? 'Requesting permission…' : 'Enable push notifications · Gemma alerts you on new requests'}
+              size="small"
+              onClick={notifStatus === 'idle' ? enableNotifications : undefined}
+              sx={{
+                bgcolor: 'rgba(251,191,36,0.07)',
+                border: '1px solid rgba(251,191,36,0.25)',
+                color: '#FBBF24',
+                fontSize: '0.68rem',
+                height: 24,
+                cursor: notifStatus === 'idle' ? 'pointer' : 'default',
+                '& .MuiChip-label': { pl: 0.5 },
+                '&:hover': notifStatus === 'idle' ? { bgcolor: 'rgba(251,191,36,0.13)' } : {},
+              }}
+            />
+          )}
+        </Box>
+      )}
+
+      <Box sx={{ flex: 1, overflow: 'auto', p: 3 }}>
+      <Box sx={{ maxWidth: { md: 700 }, mx: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
 
         {/* Pending requests */}
         {pendingRequests.length > 0 && (
@@ -331,6 +459,7 @@ export default function PharmacistPage() {
             </Box>
           </Box>
         )}
+      </Box>
       </Box>
 
       {/* Per-medicine response dialog */}

@@ -14,6 +14,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import MicIcon from '@mui/icons-material/Mic';
 import MedicationIcon from '@mui/icons-material/Medication';
 import ThumbDownOutlinedIcon from '@mui/icons-material/ThumbDownOutlined';
+import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNexusBrain } from '@/components/NexusBrainProvider';
 import { reportFeedback, type FailurePattern } from '@/lib/nexus-safety';
@@ -47,6 +48,20 @@ interface Message {
   isError?: boolean;
   failedQuery?: string;
 }
+
+type ScanMode = 'ask' | 'medicine' | 'prescription';
+
+const SCAN_OPTIONS: { mode: ScanMode; emoji: string; label: string; sub: string }[] = [
+  { mode: 'ask',         emoji: '💬', label: 'Ask about a photo',    sub: 'Identify pills, read a label, or ask anything' },
+  { mode: 'medicine',    emoji: '💊', label: 'Find this medicine',   sub: "Scan the box — we'll find it nearby" },
+  { mode: 'prescription',emoji: '📋', label: 'Scan a prescription',  sub: 'Extract all medicines from your Rx' },
+];
+
+const LANG_SHORT: Record<string, string> = {
+  'en-US': 'EN', 'fr-FR': 'FR', 'ar': 'AR', 'sw': 'SW',
+  'yo': 'YO', 'ig': 'IG', 'ha': 'HA', 'am': 'AM', 'zu': 'ZU',
+  'es-ES': 'ES', 'pt-BR': 'PT', 'hi-IN': 'HI', 'zh-CN': 'ZH', 'de-DE': 'DE',
+};
 
 const SUGGESTED = [
   'I need coartem',
@@ -133,7 +148,6 @@ export default function NexusPage() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [attachedImage, setAttachedImage] = useState<{ base64: string; mimeType: string; preview: string } | null>(null);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
@@ -141,6 +155,10 @@ export default function NexusPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null);
   const transcriptRef = useRef('');
+  const [scanMenu, setScanMenu] = useState<'mode' | 'source' | null>(null);
+  const [scanMode, setScanMode] = useState<ScanMode>('ask');
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
   const { brain, logger } = useNexusBrain();
 
   // Dispatch setup
@@ -159,66 +177,200 @@ export default function NexusPage() {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages]);
 
-  const addMsg = (msg: Omit<Message, 'id' | 'timestamp'>) =>
-    setMessages((prev) => [...prev, { ...msg, id: `${msg.role}_${Date.now()}_${Math.random()}`, timestamp: new Date() }]);
+  const addMsg = (msg: Omit<Message, 'id' | 'timestamp'>): string => {
+    const id = `${msg.role}_${Date.now()}_${Math.random()}`;
+    setMessages((prev) => [...prev, { ...msg, id, timestamp: new Date() }]);
+    return id;
+  };
+
+  const updateMsg = (id: string, updates: Partial<Omit<Message, 'id' | 'timestamp'>>) =>
+    setMessages((prev) => prev.map((m) => m.id === id ? { ...m, ...updates } : m));
+
+  const [scanningMsgId, setScanningMsgId] = useState<string | null>(null);
+
+  const voiceInputRef = useRef(false);
+
+  // Nigerian locale codes improve voice selection on devices that have regional packs
+  const TTS_LANG: Record<string, string> = {
+    'ha': 'ha-NG', 'yo': 'yo-NG', 'ig': 'ig-NG',
+    'am': 'am-ET', 'zu': 'zu-ZA', 'sw': 'sw-KE',
+  };
+
+  const speakText = (text: string) => {
+    if (!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+
+    const doSpeak = () => {
+      const utter = new SpeechSynthesisUtterance(text);
+      const ttslang = TTS_LANG[speechLang] ?? speechLang;
+      utter.lang = ttslang;
+      utter.rate = 0.87;  // slightly slower = more natural cadence
+      utter.pitch = 1.05;
+
+      // Pick the best available voice for this language
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length > 0) {
+        const prefix = ttslang.split('-')[0];
+        const exact = voices.find((v) => v.lang === ttslang);
+        const regional = voices.find((v) => v.lang.startsWith(prefix + '-'));
+        const any = voices.find((v) => v.lang.startsWith(prefix));
+        const chosen = exact ?? regional ?? any;
+        if (chosen) utter.voice = chosen;
+      }
+
+      window.speechSynthesis.speak(utter);
+    };
+
+    // Voices list may not be populated yet on first call
+    if (window.speechSynthesis.getVoices().length > 0) {
+      doSpeak();
+    } else {
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.onvoiceschanged = null;
+        doSpeak();
+      };
+    }
+  };
 
   // ── Image handling ──
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const processImageFile = (file: File): Promise<{ base64: string; mimeType: string; preview: string }> =>
+    new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const dataUrl = ev.target?.result as string;
+        const img = new Image();
+        img.onload = () => {
+          const MAX = 800;
+          let { width, height } = img;
+          if (width > MAX || height > MAX) {
+            if (width > height) { height = Math.round(height * MAX / width); width = MAX; }
+            else { width = Math.round(width * MAX / height); height = MAX; }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width; canvas.height = height;
+          canvas.getContext('2d')!.drawImage(img, 0, 0, width, height);
+          resolve({ base64: canvas.toDataURL('image/jpeg', 0.82), mimeType: 'image/jpeg', preview: dataUrl });
+        };
+        img.src = dataUrl;
+      };
+      reader.readAsDataURL(file);
+    });
+
+  const runScan = async (imageBase64: string, preview: string, mode: 'medicine' | 'prescription') => {
+    const doneLabel = mode === 'medicine' ? 'Scanned medicine box' : 'Scanned prescription';
+    const msgId = addMsg({ role: 'user', text: mode === 'medicine' ? 'Scanning medicine box…' : 'Scanning prescription…', imagePreview: preview });
+    setScanningMsgId(msgId);
+    setLoading(true);
+    try {
+      const endpoint = mode === 'medicine' ? '/api/scan-med' : '/api/scan-rx';
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: imageBase64 }),
+      });
+      if (!res.ok) throw new Error('Scan failed');
+      const data = await res.json();
+      const medicines: Medicine[] = data.medicines ?? [];
+      updateMsg(msgId, { text: doneLabel });
+      setScanningMsgId(null);
+      if (medicines.length > 0) {
+        const names = medicines.map((m) => m.name).join(', ');
+        addMsg({ role: 'ai', text: `Found: ${names}. Searching for nearby pharmacists…` });
+        setLoading(false);
+        await triggerDispatch(medicines);
+      } else {
+        addMsg({ role: 'ai', text: "Couldn't read the image clearly — try better lighting or move closer." });
+        setLoading(false);
+      }
+    } catch {
+      updateMsg(msgId, { text: doneLabel });
+      setScanningMsgId(null);
+      addMsg({ role: 'ai', text: 'Scan failed — please try again.' });
+      setLoading(false);
+    }
+  };
+
+  const handleScanFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      const img = new Image();
-      img.onload = () => {
-        const MAX = 800;
-        let { width, height } = img;
-        if (width > MAX || height > MAX) {
-          if (width > height) { height = Math.round(height * MAX / width); width = MAX; }
-          else { width = Math.round(width * MAX / height); height = MAX; }
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = width; canvas.height = height;
-        canvas.getContext('2d')!.drawImage(img, 0, 0, width, height);
-        setAttachedImage({ base64: canvas.toDataURL('image/jpeg', 0.82), mimeType: 'image/jpeg', preview: dataUrl });
-      };
-      img.src = dataUrl;
-    };
-    reader.readAsDataURL(file);
     e.target.value = '';
+    const imageData = await processImageFile(file);
+    setScanMenu(null);
+    if (scanMode === 'ask') {
+      setAttachedImage(imageData);
+    } else {
+      await runScan(imageData.base64, imageData.preview, scanMode as 'medicine' | 'prescription');
+    }
   };
 
   // ── Voice input ──
-  const toggleRecording = () => {
+  const toggleRecording = async () => {
     if (recording) { recognitionRef.current?.stop(); setRecording(false); return; }
+
+    // Explicitly request mic permission first — required for reliable mobile re-use
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop()); // release; SR will re-acquire
+    } catch (err: unknown) {
+      const name = (err as { name?: string })?.name ?? '';
+      const isDenied = name === 'NotAllowedError' || name === 'PermissionDeniedError';
+      logger.emit('ERROR', isDenied
+        ? 'Microphone access denied — check your browser settings'
+        : 'Microphone not available on this device');
+      return;
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) { logger.emit('ERROR', 'Voice input not supported in this browser'); return; }
+    if (!SR) { logger.emit('ERROR', 'Voice input not supported — use Chrome or Safari'); return; }
+
     transcriptRef.current = '';
     const recognition = new SR();
     recognition.continuous = false;
     recognition.interimResults = true;
     recognition.lang = speechLang;
     recognitionRef.current = recognition;
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     recognition.onresult = (e: any) => {
       const t = Array.from(e.results).map((r: any) => r[0].transcript).join('');
       transcriptRef.current = t;
       setInput(t);
     };
+
     recognition.onend = async () => {
       setRecording(false);
       const raw = transcriptRef.current.trim();
       if (!raw) return;
       setTranscribing(true);
       const corrected = await brain.correctTranscript(raw, speechLang);
+      voiceInputRef.current = true; // next send should speak the response
       setInput(corrected);
       setTranscribing(false);
       transcriptRef.current = '';
     };
-    recognition.onerror = () => { setRecording(false); setTranscribing(false); };
-    recognition.start();
-    setRecording(true);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recognition.onerror = (e: any) => {
+      setRecording(false);
+      setTranscribing(false);
+      if (e.error === 'no-speech') return; // silent — user just didn't speak
+      const msgs: Record<string, string> = {
+        'not-allowed': 'Microphone access denied',
+        'network': 'Network error — try again',
+        'audio-capture': 'No microphone found',
+        'aborted': '',
+      };
+      const msg = msgs[e.error as string] ?? `Voice error: ${e.error}`;
+      if (msg) logger.emit('ERROR', msg);
+    };
+
+    try {
+      recognition.start();
+      setRecording(true);
+    } catch {
+      logger.emit('ERROR', 'Could not start voice input — tap again');
+    }
   };
 
   // ── Dispatch ──
@@ -288,36 +440,31 @@ export default function NexusPage() {
     if (!messageText && !image) return;
     if (loading) return;
 
+    const isVoice = voiceInputRef.current;
+    voiceInputRef.current = false;
+
+    // iOS blocks speechSynthesis from async contexts. Fire a silent utterance NOW
+    // (inside the gesture chain) to unlock audio for the response that follows.
+    if (isVoice && 'speechSynthesis' in window) {
+      const unlock = new SpeechSynthesisUtterance('');
+      unlock.volume = 0;
+      window.speechSynthesis.speak(unlock);
+    }
+
     addMsg({ role: 'user', text: messageText, imagePreview: image?.preview });
     setInput('');
     setAttachedImage(null);
 
     // Image path: try medicine scan first, fall back to visual consultation
+    // Image path — always visual consultation (scan modes go through handleScanFile, not here)
     if (image) {
       setLoading(true);
-      try {
-        const scanRes = await fetch('/api/scan-med', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: image.base64 }),
-        });
-        if (scanRes.ok) {
-          const { medicines }: { medicines: Medicine[] } = await scanRes.json();
-          if (medicines?.length > 0) {
-            const names = medicines.map((m) => m.name).join(', ');
-            addMsg({ role: 'ai', text: `Identified: ${names}. Searching for nearby pharmacists…` });
-            setLoading(false);
-            await triggerDispatch(medicines);
-            return;
-          }
-        }
-      } catch { /* fall through */ }
-      // Visual consultation fallback
       try {
         const history = messages.filter((m) => m.role === 'user' || m.role === 'ai').slice(-6)
           .map((m) => ({ role: m.role === 'user' ? 'user' : 'model', text: m.text }));
         const result: ConsultResult = await brain.consultWithImage(messageText || 'What is this?', image.base64, image.mimeType, history);
         addMsg({ role: 'ai', text: result.text, flagged: result.flagged, patternsDetected: result.patternsDetected });
+        if (isVoice) speakText(result.text);
       } catch (err) {
         addMsg({ role: 'ai', text: err instanceof Error ? err.message : 'Error processing image' });
       }
@@ -349,6 +496,7 @@ export default function NexusPage() {
         ? { type: 'find_medicine', medicines, originalQuery: messageText }
         : undefined;
       addMsg({ role: 'ai', text: consultResult.text, flagged: consultResult.flagged, patternsDetected: consultResult.patternsDetected, suggestedAction });
+      if (isVoice) speakText(consultResult.text);
     } catch {
       addMsg({ role: 'ai', text: 'Connection dropped — Gemma couldn\'t be reached. Tap Retry to try again.', isError: true, failedQuery: messageText });
     } finally {
@@ -378,7 +526,7 @@ export default function NexusPage() {
   };
 
   return (
-    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', maxWidth: { md: 880 }, mx: 'auto', width: '100%' }}>
       {/* Header */}
       <Box sx={{ px: 3, py: 2, flexShrink: 0, borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: 2 }}>
         <Box sx={{ p: 1, borderRadius: '10px', background: 'linear-gradient(135deg, rgba(96,165,250,0.2) 0%, rgba(0,229,160,0.2) 100%)' }}>
@@ -436,7 +584,7 @@ export default function NexusPage() {
                   <Typography sx={{ fontSize: '0.75rem', color: '#00E5A0', fontStyle: 'italic' }}>{msg.text}</Typography>
                 </Box>
               ) : (
-                <MessageBubble msg={msg} onSuggestedAction={handleSuggestedAction} onRetry={sendMessage} />
+                <MessageBubble msg={msg} onSuggestedAction={handleSuggestedAction} onRetry={sendMessage} onSpeak={msg.role === 'ai' ? speakText : undefined} isScanningMsg={msg.id === scanningMsgId} />
               )}
             </motion.div>
           ))}
@@ -460,7 +608,72 @@ export default function NexusPage() {
       </Box>
 
       {/* Input */}
-      <Box sx={{ px: 3, py: 2, borderTop: '1px solid rgba(255,255,255,0.06)', flexShrink: 0 }}>
+      <Box sx={{ px: 3, py: 2, borderTop: '1px solid rgba(255,255,255,0.06)', flexShrink: 0, position: 'relative' }}>
+        {/* Scan intent menu */}
+        {scanMenu && (
+          <>
+            {/* Backdrop — closes menu on outside tap */}
+            <Box onClick={() => setScanMenu(null)} sx={{ position: 'fixed', inset: 0, zIndex: 9 }} />
+            <Box sx={{
+              position: 'absolute', bottom: 'calc(100% + 8px)', left: 16, right: 16,
+              bgcolor: '#141f35', border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '18px', p: 1, zIndex: 10,
+              boxShadow: '0 -8px 40px rgba(0,0,0,0.55)',
+            }}>
+              {scanMenu === 'mode' && (
+                <>
+                  <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, color: '#475569', letterSpacing: '0.08em', textTransform: 'uppercase', px: 1.5, pt: 0.5, pb: 0.75 }}>
+                    What would you like to do?
+                  </Typography>
+                  {SCAN_OPTIONS.map(({ mode, emoji, label, sub }) => (
+                    <Box key={mode}
+                      onClick={() => { setScanMode(mode); setScanMenu('source'); }}
+                      sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: 1.5, py: 1, borderRadius: '12px', cursor: 'pointer', transition: 'background 0.12s', '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' } }}>
+                      <Typography sx={{ fontSize: '1.3rem', lineHeight: 1, flexShrink: 0 }}>{emoji}</Typography>
+                      <Box>
+                        <Typography sx={{ fontSize: '0.85rem', fontWeight: 600, color: '#E0F2F1', lineHeight: 1.3 }}>{label}</Typography>
+                        <Typography sx={{ fontSize: '0.72rem', color: '#64748B' }}>{sub}</Typography>
+                      </Box>
+                    </Box>
+                  ))}
+                </>
+              )}
+              {scanMenu === 'source' && (
+                <>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 1.5, pt: 0.5, pb: 0.75 }}>
+                    <Box onClick={() => setScanMenu('mode')} sx={{ cursor: 'pointer', color: '#64748B', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 0.5, '&:hover': { color: '#E0F2F1' } }}>
+                      ← <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Back</Typography>
+                    </Box>
+                    <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, color: '#475569', letterSpacing: '0.08em', textTransform: 'uppercase', ml: 0.5 }}>
+                      {SCAN_OPTIONS.find(o => o.mode === scanMode)?.label}
+                    </Typography>
+                  </Box>
+                  {[
+                    { label: 'Camera', sub: 'Take a photo now', ref: cameraRef },
+                    { label: 'Gallery', sub: 'Choose from your photos or files', ref: galleryRef },
+                  ].map(({ label, sub, ref: inputRef }) => (
+                    <Box key={label}
+                      onClick={() => inputRef.current?.click()}
+                      sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: 1.5, py: 1, borderRadius: '12px', cursor: 'pointer', transition: 'background 0.12s', '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' } }}>
+                      <Box sx={{ width: 36, height: 36, borderRadius: '10px', bgcolor: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        {label === 'Camera' ? <CameraAltIcon sx={{ fontSize: 18, color: '#60A5FA' }} /> : <LocalPharmacyIcon sx={{ fontSize: 18, color: '#60A5FA' }} />}
+                      </Box>
+                      <Box>
+                        <Typography sx={{ fontSize: '0.85rem', fontWeight: 600, color: '#E0F2F1', lineHeight: 1.3 }}>{label}</Typography>
+                        <Typography sx={{ fontSize: '0.72rem', color: '#64748B' }}>{sub}</Typography>
+                      </Box>
+                    </Box>
+                  ))}
+                </>
+              )}
+            </Box>
+          </>
+        )}
+
+        {/* Hidden file inputs */}
+        <input type="file" accept="image/*" capture="environment" hidden ref={cameraRef} onChange={handleScanFile} />
+        <input type="file" accept="image/*" hidden ref={galleryRef} onChange={handleScanFile} />
+
         {attachedImage && (
           <Box sx={{ mb: 1.5, position: 'relative', display: 'inline-block' }}>
             <Box component="img" src={attachedImage.preview} alt="Attached" sx={{ height: 72, borderRadius: '8px', display: 'block', border: '1px solid rgba(255,255,255,0.1)' }} />
@@ -474,8 +687,9 @@ export default function NexusPage() {
           <MicIcon sx={{ fontSize: 13, color: '#475569' }} />
           <Typography sx={{ fontSize: '0.6rem', color: '#475569' }}>voice language</Typography>
           <Select value={speechLang} onChange={(e) => setSpeechLang(e.target.value)} size="small" variant="outlined"
+            renderValue={(val) => LANG_SHORT[val as string] ?? val}
             sx={{ fontSize: '0.7rem', height: 24, color: '#C084FC', bgcolor: 'rgba(192,132,252,0.08)', border: '1px solid rgba(192,132,252,0.25)', borderRadius: '8px', '& .MuiOutlinedInput-notchedOutline': { border: 'none' }, '& .MuiSelect-select': { py: 0, px: 1 }, '& .MuiSvgIcon-root': { color: '#C084FC', fontSize: 16 } }}
-            MenuProps={{ slotProps: { paper: { sx: { bgcolor: '#1A2540', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px', mt: 0.5, '& .MuiMenuItem-root': { fontSize: '0.8rem', color: '#CBD5E1', py: 0.75, '&:hover': { bgcolor: 'rgba(192,132,252,0.1)', color: '#E0F2F1' }, '&.Mui-selected': { bgcolor: 'rgba(192,132,252,0.15)', color: '#C084FC', fontWeight: 700 } } } } } }}>
+            MenuProps={{ slotProps: { paper: { sx: { bgcolor: '#1A2540', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px', mt: 0.5, maxHeight: 280, overflowY: 'auto', '& .MuiMenuItem-root': { fontSize: '0.8rem', color: '#CBD5E1', py: 0.75, '&:hover': { bgcolor: 'rgba(192,132,252,0.1)', color: '#E0F2F1' }, '&.Mui-selected': { bgcolor: 'rgba(192,132,252,0.15)', color: '#C084FC', fontWeight: 700 } } } } } }}>
             <ListSubheader sx={{ bgcolor: '#1A2540', color: '#475569', fontSize: '0.65rem', letterSpacing: '0.08em', textTransform: 'uppercase', lineHeight: '28px' }}>Preferred</ListSubheader>
             <MenuItem value="en-US">English</MenuItem>
             <MenuItem value="fr-FR">French</MenuItem>
@@ -496,9 +710,8 @@ export default function NexusPage() {
           </Select>
         </Box>
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end', bgcolor: 'rgba(15,23,42,0.6)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)', px: 2, py: 1, transition: 'border-color 0.2s ease', '&:focus-within': { borderColor: 'rgba(0,229,160,0.3)' } }}>
-          <input type="file" accept="image/*" capture="environment" hidden ref={fileInputRef} onChange={handleImageSelect} />
-          <IconButton onClick={() => fileInputRef.current?.click()} size="small"
-            sx={{ color: attachedImage ? '#60A5FA' : '#475569', '&:hover': { color: '#60A5FA' }, flexShrink: 0 }}>
+          <IconButton onClick={() => setScanMenu(scanMenu ? null : 'mode')} size="small"
+            sx={{ color: scanMenu ? '#60A5FA' : attachedImage ? '#60A5FA' : '#475569', '&:hover': { color: '#60A5FA' }, flexShrink: 0 }}>
             <CameraAltIcon sx={{ fontSize: 20 }} />
           </IconButton>
           <IconButton onClick={toggleRecording} disabled={transcribing} size="small"
@@ -937,7 +1150,7 @@ const FEEDBACK_OPTIONS: { pattern: FailurePattern; label: string }[] = [
   { pattern: 'excessive_length', label: 'Too long' },
 ];
 
-function MessageBubble({ msg, onSuggestedAction, onRetry }: { msg: Message; onSuggestedAction?: (a: SuggestedAction) => void; onRetry?: (query: string) => void }) {
+function MessageBubble({ msg, onSuggestedAction, onRetry, onSpeak, isScanningMsg }: { msg: Message; onSuggestedAction?: (a: SuggestedAction) => void; onRetry?: (query: string) => void; onSpeak?: (text: string) => void; isScanningMsg?: boolean }) {
   const isUser = msg.role === 'user';
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [selectedPattern, setSelectedPattern] = useState<FailurePattern | null>(null);
@@ -957,73 +1170,123 @@ function MessageBubble({ msg, onSuggestedAction, onRetry }: { msg: Message; onSu
       <Avatar sx={{ width: 32, height: 32, flexShrink: 0, bgcolor: isUser ? 'rgba(96,165,250,0.15)' : 'rgba(0,229,160,0.15)' }}>
         {isUser ? <PersonIcon sx={{ fontSize: 18, color: '#60A5FA' }} /> : <SmartToyIcon sx={{ fontSize: 18, color: '#00E5A0' }} />}
       </Avatar>
-      <Box sx={{ maxWidth: '78%', display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-        <Box sx={{
-          px: 2, py: 1.5,
-          borderRadius: isUser ? '16px 4px 16px 16px' : '4px 16px 16px 16px',
-          bgcolor: isUser ? 'rgba(96,165,250,0.1)' : msg.isError ? 'rgba(239,68,68,0.05)' : 'rgba(255,255,255,0.04)',
-          border: `1px solid ${isUser ? 'rgba(96,165,250,0.15)' : msg.isError ? 'rgba(239,68,68,0.2)' : msg.flagged ? 'rgba(251,191,36,0.25)' : 'rgba(255,255,255,0.06)'}`,
-        }}>
-          {msg.imagePreview && <Box component="img" src={msg.imagePreview} alt="Attached" sx={{ maxWidth: '100%', maxHeight: 200, borderRadius: '8px', display: 'block', mb: msg.text ? 1 : 0 }} />}
-          <Typography variant="body2" sx={{ color: msg.isError ? '#FCA5A5' : '#E0F2F1', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{msg.text}</Typography>
-          {msg.isError && msg.failedQuery && onRetry && (
-            <Box
-              onClick={() => onRetry(msg.failedQuery!)}
-              sx={{
-                mt: 1, px: 1.25, py: 0.7, borderRadius: '7px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 0.75,
-                border: '1px solid rgba(239,68,68,0.35)', bgcolor: 'rgba(239,68,68,0.08)',
-                '&:hover': { bgcolor: 'rgba(239,68,68,0.14)', borderColor: 'rgba(239,68,68,0.5)' }, transition: 'all 0.15s',
-              }}
-            >
-              <Typography sx={{ fontSize: '0.78rem', fontWeight: 600, color: '#FCA5A5' }}>↺ Retry</Typography>
-            </Box>
-          )}
-          {msg.suggestedAction && !isUser && (
-            <Box
-              onClick={() => {
-                if (actionTaken || !onSuggestedAction) return;
-                setActionTaken(true);
-                onSuggestedAction(msg.suggestedAction!);
-              }}
-              sx={{
-                mt: 1.25, px: 1.5, py: 0.9, borderRadius: '8px', cursor: actionTaken ? 'default' : 'pointer',
-                border: `1px solid ${actionTaken ? 'rgba(0,229,160,0.15)' : 'rgba(0,229,160,0.35)'}`,
-                bgcolor: actionTaken ? 'rgba(0,229,160,0.03)' : 'rgba(0,229,160,0.07)',
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                transition: 'all 0.15s',
-                '&:hover': !actionTaken ? { bgcolor: 'rgba(0,229,160,0.12)', borderColor: '#00E5A0' } : {},
-              }}
-            >
-              <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: actionTaken ? '#475569' : '#00E5A0' }}>
-                {actionTaken
-                  ? 'On it…'
-                  : msg.suggestedAction.medicines.length === 1
-                    ? `Find ${msg.suggestedAction.medicines[0].name} near me`
-                    : msg.suggestedAction.medicines.length === 2
-                      ? `Find ${msg.suggestedAction.medicines[0].name} & ${msg.suggestedAction.medicines[1].name}`
-                      : `Find these ${msg.suggestedAction.medicines.length} medicines`}
-              </Typography>
-              {!actionTaken && <Typography sx={{ fontSize: '0.8rem', color: '#00E5A0' }}>→</Typography>}
-            </Box>
-          )}
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: isUser ? 'flex-end' : 'space-between', mt: 0.5 }}>
-            <Typography sx={{ fontSize: '0.6rem', color: '#475569' }}>{msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Typography>
-            {msg.role === 'ai' && !feedbackDone && (
-              <IconButton size="small" onClick={() => setFeedbackOpen(true)} sx={{ ml: 'auto', p: 0.25, color: '#334155', '&:hover': { color: '#FBBF24' } }}>
-                <ThumbDownOutlinedIcon sx={{ fontSize: 12 }} />
-              </IconButton>
+
+      {/* Outer row: bubble column + speaker button (AI only) */}
+      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', maxWidth: isUser ? '78%' : { xs: 'calc(100% - 48px)', md: 620 }, flex: isUser ? undefined : 1 }}>
+
+        {/* Bubble + flagged indicator */}
+        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+          <Box sx={{
+            px: 2, py: 1.5,
+            borderRadius: isUser ? '16px 4px 16px 16px' : '4px 16px 16px 16px',
+            bgcolor: isUser ? 'rgba(96,165,250,0.1)' : msg.isError ? 'rgba(239,68,68,0.05)' : 'rgba(255,255,255,0.04)',
+            border: `1px solid ${isUser ? 'rgba(96,165,250,0.15)' : msg.isError ? 'rgba(239,68,68,0.2)' : msg.flagged ? 'rgba(251,191,36,0.25)' : 'rgba(255,255,255,0.06)'}`,
+          }}>
+            {msg.imagePreview && (
+              <Box sx={{ position: 'relative', display: 'inline-block', mb: msg.text ? 1 : 0, width: '100%' }}>
+                <Box component="img" src={msg.imagePreview} alt="Attached" sx={{ maxWidth: '100%', maxHeight: 200, borderRadius: '8px', display: 'block' }} />
+                {isScanningMsg && (
+                  <Box sx={{ position: 'absolute', inset: 0, borderRadius: '8px', overflow: 'hidden', pointerEvents: 'none' }}>
+                    <Box sx={{
+                      position: 'absolute', left: 0, right: 0, height: '1.5px',
+                      background: 'linear-gradient(90deg, transparent 0%, rgba(0,229,160,0.7) 30%, rgba(0,229,160,0.9) 50%, rgba(0,229,160,0.7) 70%, transparent 100%)',
+                      boxShadow: '0 0 8px rgba(0,229,160,0.5), 0 0 20px rgba(0,229,160,0.2)',
+                      animation: 'scanSweep 2s linear infinite',
+                      '@keyframes scanSweep': {
+                        '0%': { top: '-2px' },
+                        '100%': { top: 'calc(100% + 2px)' },
+                      },
+                    }} />
+                  </Box>
+                )}
+              </Box>
             )}
-            {msg.role === 'ai' && feedbackDone && <Typography sx={{ fontSize: '0.6rem', color: '#475569', ml: 'auto' }}>feedback logged</Typography>}
+            <Typography variant="body2" sx={{ color: msg.isError ? '#FCA5A5' : '#E0F2F1', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{msg.text}</Typography>
+            {msg.isError && msg.failedQuery && onRetry && (
+              <Box
+                onClick={() => onRetry(msg.failedQuery!)}
+                sx={{
+                  mt: 1, px: 1.25, py: 0.7, borderRadius: '7px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 0.75,
+                  border: '1px solid rgba(239,68,68,0.35)', bgcolor: 'rgba(239,68,68,0.08)',
+                  '&:hover': { bgcolor: 'rgba(239,68,68,0.14)', borderColor: 'rgba(239,68,68,0.5)' }, transition: 'all 0.15s',
+                }}
+              >
+                <Typography sx={{ fontSize: '0.78rem', fontWeight: 600, color: '#FCA5A5' }}>↺ Retry</Typography>
+              </Box>
+            )}
+            {msg.suggestedAction && !isUser && (
+              <Box
+                onClick={() => {
+                  if (actionTaken || !onSuggestedAction) return;
+                  setActionTaken(true);
+                  onSuggestedAction(msg.suggestedAction!);
+                }}
+                sx={{
+                  mt: 1.25, px: 1.5, py: 0.9, borderRadius: '8px', cursor: actionTaken ? 'default' : 'pointer',
+                  border: `1px solid ${actionTaken ? 'rgba(0,229,160,0.15)' : 'rgba(0,229,160,0.35)'}`,
+                  bgcolor: actionTaken ? 'rgba(0,229,160,0.03)' : 'rgba(0,229,160,0.07)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  transition: 'all 0.15s',
+                  '&:hover': !actionTaken ? { bgcolor: 'rgba(0,229,160,0.12)', borderColor: '#00E5A0' } : {},
+                }}
+              >
+                <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: actionTaken ? '#475569' : '#00E5A0' }}>
+                  {actionTaken
+                    ? 'On it…'
+                    : msg.suggestedAction.medicines.length === 1
+                      ? `Find ${msg.suggestedAction.medicines[0].name} near me`
+                      : msg.suggestedAction.medicines.length === 2
+                        ? `Find ${msg.suggestedAction.medicines[0].name} & ${msg.suggestedAction.medicines[1].name}`
+                        : `Find these ${msg.suggestedAction.medicines.length} medicines`}
+                </Typography>
+                {!actionTaken && <Typography sx={{ fontSize: '0.8rem', color: '#00E5A0' }}>→</Typography>}
+              </Box>
+            )}
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: isUser ? 'flex-end' : 'space-between', mt: 0.5 }}>
+              <Typography sx={{ fontSize: '0.6rem', color: '#475569' }}>{msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Typography>
+              {msg.role === 'ai' && (
+                <Box sx={{ ml: 'auto' }}>
+                  {!feedbackDone ? (
+                    <IconButton size="small" onClick={() => setFeedbackOpen(true)} sx={{ p: 0.25, color: '#334155', '&:hover': { color: '#FBBF24' } }}>
+                      <ThumbDownOutlinedIcon sx={{ fontSize: 12 }} />
+                    </IconButton>
+                  ) : (
+                    <Typography sx={{ fontSize: '0.6rem', color: '#475569' }}>feedback logged</Typography>
+                  )}
+                </Box>
+              )}
+            </Box>
           </Box>
+          {msg.role === 'ai' && msg.flagged && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, px: 1, py: 0.5, borderRadius: '6px', bgcolor: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.15)' }}>
+              <Typography sx={{ fontSize: '0.6rem' }}>⚠️</Typography>
+              <Typography sx={{ fontSize: '0.62rem', color: '#FBBF24', fontWeight: 600 }}>AI response flagged for review</Typography>
+              {msg.patternsDetected && msg.patternsDetected.length > 0 && (
+                <Typography sx={{ fontSize: '0.58rem', color: '#64748B' }}>({msg.patternsDetected.join(', ')})</Typography>
+              )}
+            </Box>
+          )}
         </Box>
-        {msg.role === 'ai' && msg.flagged && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, px: 1, py: 0.5, borderRadius: '6px', bgcolor: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.15)' }}>
-            <Typography sx={{ fontSize: '0.6rem' }}>⚠️</Typography>
-            <Typography sx={{ fontSize: '0.62rem', color: '#FBBF24', fontWeight: 600 }}>AI response flagged for review</Typography>
-            {msg.patternsDetected && msg.patternsDetected.length > 0 && (
-              <Typography sx={{ fontSize: '0.58rem', color: '#64748B' }}>({msg.patternsDetected.join(', ')})</Typography>
-            )}
-          </Box>
+
+        {/* Prominent speak button — beside the bubble, visible to everyone */}
+        {msg.role === 'ai' && onSpeak && (
+          <IconButton
+            onClick={() => onSpeak(msg.text)}
+            sx={{
+              flexShrink: 0,
+              width: 42,
+              height: 42,
+              bgcolor: 'rgba(0,229,160,0.1)',
+              border: '1px solid rgba(0,229,160,0.25)',
+              borderRadius: '12px',
+              color: '#00E5A0',
+              '&:hover': { bgcolor: 'rgba(0,229,160,0.22)', borderColor: '#00E5A0', transform: 'scale(1.06)' },
+              '&:active': { transform: 'scale(0.96)' },
+              transition: 'all 0.15s',
+            }}
+          >
+            <VolumeUpIcon sx={{ fontSize: 22 }} />
+          </IconButton>
         )}
       </Box>
 

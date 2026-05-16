@@ -5,9 +5,7 @@ import { Box, Typography, Card, CardContent, CardActionArea, Chip } from '@mui/m
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import ChatIcon from '@mui/icons-material/Chat';
-import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import SearchIcon from '@mui/icons-material/Search';
-import WhatsAppIcon from '@mui/icons-material/WhatsApp';
 import { useNexusBrain } from '@/components/NexusBrainProvider';
 
 const features = [
@@ -20,28 +18,12 @@ const features = [
     color: '#60A5FA',
   },
   {
-    path: '/scanner',
-    icon: <CameraAltIcon sx={{ fontSize: 32 }} />,
-    title: 'AI Scanner',
-    subtitle: 'Medicine & Prescription Reader',
-    description: 'Photograph any medicine box or prescription. Gemma 4 extracts everything automatically.',
-    color: '#4ADE80',
-  },
-  {
     path: '/search',
     icon: <SearchIcon sx={{ fontSize: 32 }} />,
     title: 'Smart Search',
-    subtitle: 'Pharmacist Connection Engine',
-    description: 'AI routes your request to the best pharmacists. Sorted by price, distance, and reliability.',
+    subtitle: 'Type or Scan · Pharmacist Finder',
+    description: 'Search by name or photograph a box — Gemma 4 identifies the medicine and finds who has it nearby.',
     color: '#C084FC',
-  },
-  {
-    path: '/whatsapp',
-    icon: <WhatsAppIcon sx={{ fontSize: 32 }} />,
-    title: 'WhatsApp Pipeline',
-    subtitle: 'Informal → Structured',
-    description: 'Gemma 4 reads informal WhatsApp drug search messages and converts them into live requests.',
-    color: '#25D366',
   },
 ];
 

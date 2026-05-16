@@ -401,7 +401,7 @@ Category:`;
 
     const isEnglish = lang.startsWith('en');
     const langName = LANG_NAMES[lang] ?? 'English';
-    nexusLogger.emit('INFERENCE', `🎙️ Gemma 4 E2B ${isEnglish ? 'correcting' : `translating from ${langName}`}: "${rawTranscript.substring(0, 50)}"`);
+    nexusLogger.emit('INFERENCE', `🎙️ Correcting medical terms (${langName}): "${rawTranscript.substring(0, 50)}"`);
 
     const prompt = isEnglish
       ? `You are a medical transcription corrector. Fix drug names, dosages, and medical terms in the voice transcript. Return ONLY the corrected text, nothing else.
@@ -416,10 +416,10 @@ Examples:
 
 Transcript: "${rawTranscript}"
 Corrected:`
-      : `You are a medical translator. The patient spoke in ${langName}. Translate their question to clear English and correct any drug names. Return ONLY the English translation, nothing else.
+      : `You are a medical transcription corrector. Fix drug names, dosages, and medical terms in this ${langName} voice transcript. Keep the text in ${langName} — do NOT translate. Return ONLY the corrected ${langName} text, nothing else.
 
 Transcript (${langName}): "${rawTranscript}"
-English:`;
+Corrected (${langName}):`;
 
     try {
       const edgeReady = nexusEdge.status === 'ready';
