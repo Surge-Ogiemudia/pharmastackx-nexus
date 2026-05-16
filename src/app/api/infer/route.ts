@@ -18,15 +18,20 @@ function clean(raw: string): string {
   const tagged = raw.match(/<response>([\s\S]*?)(?:<\/response>|$)/i);
   if (tagged?.[1]?.trim()) return tagged[1].trim();
 
-  // Strip thinking tags and common reasoning preambles
+  // Strip <thinking> blocks
   let text = raw.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
-  text = text.replace(/\blet me (think|reconsider|check|verify)\b[\s\S]*?\n/gi, '');
-  text = text.replace(/\b(i need to|first let's)\b[\s\S]*?\n/gi, '');
 
-  // Remove lines that are echoed system instructions
+  // Filter out reasoning lines — any line that starts with * (model analysis/bullets)
+  // or that echoes system instructions. Pharmacist answers are always prose, never bullets.
   text = text.split('\n')
-    .filter(line => !INSTRUCTION_SIGNALS.some(sig => line.toLowerCase().includes(sig.toLowerCase())))
-    .join('\n');
+    .filter(line => {
+      const t = line.trim();
+      if (!t) return false;
+      if (t.startsWith('*')) return false;
+      return !INSTRUCTION_SIGNALS.some(sig => t.toLowerCase().includes(sig.toLowerCase()));
+    })
+    .join('\n')
+    .trim();
 
   // Cap at 3 sentences
   const sentences = text.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 10);
@@ -48,7 +53,17 @@ export async function POST(req: NextRequest) {
     });
 
     const result = await model.generateContent(prompt);
-    const text = clean(result.response.text().trim());
+    let text = clean(result.response.text().trim());
+
+    // Model sometimes outputs only bullet reasoning with no prose answer.
+    // Retry once with an explicit no-bullets instruction.
+    if (!text || text.length < 10) {
+      const retry = await model.generateContent(
+        `Answer in 1-3 plain sentences only. No bullet points, no asterisks, no reasoning. Just the pharmacist answer.\n\n${prompt}`
+      );
+      text = clean(retry.response.text().trim());
+    }
+
     return NextResponse.json({ text });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
