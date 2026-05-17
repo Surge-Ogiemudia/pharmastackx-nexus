@@ -24,23 +24,10 @@ function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
 
 function NotificationBanner() {
   const [show, setShow] = useState(false);
-  const [isIOSInstallPrompt, setIsIOSInstallPrompt] = useState(false);
 
   useEffect(() => {
-    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
-
-    // iPhone/iPad in a regular Safari tab — push requires the PWA to be installed.
-    // Show an "Add to Home Screen" nudge instead of a useless notification prompt.
-    if (isIOS && !isStandalone) {
-      if (!localStorage.getItem('psx_ios_install_asked')) {
-        setIsIOSInstallPrompt(true);
-        setShow(true);
-      }
-      return;
-    }
-
-    // All other browsers (Android Chrome, desktop, iOS PWA standalone)
+    // iOS doesn't support web push without a full PWA setup — skip entirely
+    if (/iphone|ipad|ipod/i.test(navigator.userAgent)) return;
     if (!('Notification' in window)) return;
     if (Notification.permission === 'denied') return;
 
@@ -62,7 +49,6 @@ function NotificationBanner() {
       return;
     }
 
-    // permission === 'default' — show banner once
     if (!localStorage.getItem('psx_notif_asked')) setShow(true);
   }, []);
 
@@ -93,11 +79,7 @@ function NotificationBanner() {
 
   const handleDismiss = () => {
     setShow(false);
-    if (isIOSInstallPrompt) {
-      localStorage.setItem('psx_ios_install_asked', 'dismissed');
-    } else {
-      localStorage.setItem('psx_notif_asked', 'dismissed');
-    }
+    localStorage.setItem('psx_notif_asked', 'dismissed');
   };
 
   return (
@@ -127,34 +109,28 @@ function NotificationBanner() {
             py: 1.25,
             borderRadius: '14px',
             bgcolor: '#0D1526',
-            border: `1px solid ${isIOSInstallPrompt ? 'rgba(96,165,250,0.3)' : 'rgba(0,229,160,0.25)'}`,
+            border: '1px solid rgba(0,229,160,0.25)',
             boxShadow: '0 8px 32px rgba(0,0,0,0.55)',
           }}>
             <Box sx={{
               width: 32, height: 32, borderRadius: '8px', flexShrink: 0,
-              bgcolor: isIOSInstallPrompt ? 'rgba(96,165,250,0.1)' : 'rgba(0,229,160,0.1)',
-              border: `1px solid ${isIOSInstallPrompt ? 'rgba(96,165,250,0.2)' : 'rgba(0,229,160,0.2)'}`,
+              bgcolor: 'rgba(0,229,160,0.1)', border: '1px solid rgba(0,229,160,0.2)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '1rem', lineHeight: 1,
             }}>
-              {isIOSInstallPrompt ? '⬆️' : <NotificationsIcon sx={{ fontSize: 16, color: '#00E5A0' }} />}
+              <NotificationsIcon sx={{ fontSize: 16, color: '#00E5A0' }} />
             </Box>
             <Typography sx={{ flex: 1, fontSize: '0.8rem', color: '#CBD5E1', lineHeight: 1.4 }}>
-              {isIOSInstallPrompt
-                ? 'Tap Share → Add to Home Screen for notifications'
-                : 'Allow notifications for the full experience'}
+              Allow notifications for the full experience
             </Typography>
-            {!isIOSInstallPrompt && (
-              <Button size="small" variant="contained" onClick={handleAllow}
-                sx={{
-                  bgcolor: '#00E5A0', color: '#0F172A', fontWeight: 700,
-                  fontSize: '0.75rem', textTransform: 'none',
-                  borderRadius: '8px', px: 1.5, py: 0.5, flexShrink: 0,
-                  '&:hover': { bgcolor: '#00C987' },
-                }}>
-                Allow
-              </Button>
-            )}
+            <Button size="small" variant="contained" onClick={handleAllow}
+              sx={{
+                bgcolor: '#00E5A0', color: '#0F172A', fontWeight: 700,
+                fontSize: '0.75rem', textTransform: 'none',
+                borderRadius: '8px', px: 1.5, py: 0.5, flexShrink: 0,
+                '&:hover': { bgcolor: '#00C987' },
+              }}>
+              Allow
+            </Button>
             <IconButton size="small" onClick={handleDismiss}
               sx={{ color: '#475569', p: 0.25, flexShrink: 0, '&:hover': { color: '#94A3B8' } }}>
               <CloseIcon sx={{ fontSize: 16 }} />
