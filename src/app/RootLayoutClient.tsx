@@ -85,7 +85,6 @@ function NotificationBanner() {
           initial={{ y: 80, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: 80, opacity: 0 }}
-          // @ts-expect-error framer-motion prop on Box
           transition={{ type: 'spring', stiffness: 320, damping: 30 }}
           sx={{
             position: 'fixed',
