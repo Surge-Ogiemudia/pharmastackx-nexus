@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createRequest, getAllActive } from '@/lib/dispatch-store';
 import { notifyPharmacists } from '@/lib/push-notify';
 
+export const maxDuration = 30;
+
 export async function POST(req: NextRequest) {
   try {
     const { medicines, userState, userPhone, patientNotes } = await req.json();
@@ -13,9 +15,9 @@ export async function POST(req: NextRequest) {
     }
     const id = await createRequest({ medicines, userState, userPhone, patientNotes: patientNotes ?? undefined });
 
-    // Fire push notification — Gemma writes the copy, then webpush delivers it.
-    // Non-blocking: response returns immediately, notification sends in background.
-    notifyPharmacists(medicines, userState, id).catch((err) =>
+    // Await the push — fire-and-forget was being killed by Vercel before it completed.
+    // Template body keeps this under 1s; no AI call in this path.
+    await notifyPharmacists(medicines, userState, id).catch((err) =>
       console.error('[dispatch notify]', err)
     );
 
