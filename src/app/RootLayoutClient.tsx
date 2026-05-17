@@ -26,26 +26,29 @@ function NotificationBanner() {
   const [show, setShow] = useState(false);
 
   useEffect(() => {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    // Notification API not available at all — skip
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'denied') return;
 
     if (Notification.permission === 'granted') {
-      // Silently re-post existing subscription — server may have restarted and lost it
-      navigator.serviceWorker.register('/sw.js')
-        .then((reg) => reg.pushManager.getSubscription())
-        .then((sub) => {
-          if (sub) fetch('/api/push-subscribe', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(sub),
-          });
-        })
-        .catch(() => {});
+      // Silently re-post existing subscription on every load — server may have
+      // restarted and lost the in-memory subscription map
+      if ('serviceWorker' in navigator && 'PushManager' in window) {
+        navigator.serviceWorker.register('/sw.js')
+          .then((reg) => reg.pushManager.getSubscription())
+          .then((sub) => {
+            if (sub) fetch('/api/push-subscribe', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(sub),
+            });
+          })
+          .catch(() => {});
+      }
       return;
     }
 
-    if (Notification.permission === 'denied') return;
-
-    // permission === 'default' — show banner only once
+    // permission === 'default' — show banner once, regardless of push support
     if (!localStorage.getItem('psx_notif_asked')) setShow(true);
   }, []);
 
@@ -56,17 +59,20 @@ function NotificationBanner() {
       const permission = await Notification.requestPermission();
       localStorage.setItem('psx_notif_asked', permission);
       if (permission !== 'granted') return;
-      const reg = await navigator.serviceWorker.register('/sw.js');
-      await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!),
-      });
-      await fetch('/api/push-subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(sub),
-      });
+      // Subscribe to push only if the browser supports it
+      if ('serviceWorker' in navigator && 'PushManager' in window) {
+        const reg = await navigator.serviceWorker.register('/sw.js');
+        await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!),
+        });
+        await fetch('/api/push-subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(sub),
+        });
+      }
     } catch (err) {
       console.error('[push-subscribe]', err);
     }
@@ -82,13 +88,13 @@ function NotificationBanner() {
       {show && (
         <Box
           component={motion.div}
-          initial={{ y: 80, opacity: 0 }}
+          initial={{ y: -72, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          exit={{ y: 80, opacity: 0 }}
+          exit={{ y: -72, opacity: 0 }}
           transition={{ type: 'spring', stiffness: 320, damping: 30 }}
           sx={{
             position: 'fixed',
-            bottom: { xs: 68, md: 24 },
+            top: 12,
             left: 16,
             right: 16,
             zIndex: 1400,
