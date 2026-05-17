@@ -1,6 +1,5 @@
 import webpush from 'web-push';
 
-// Initialise VAPID once — module is a singleton in the Node.js process
 if (process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
   webpush.setVapidDetails(
     'mailto:pogiemudia@gmail.com',
@@ -9,9 +8,10 @@ if (process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
   );
 }
 
-// In-memory store keyed by endpoint — resets on server restart,
-// pharmacist page re-registers on every load so it self-heals
-const subscriptions = new Map<string, webpush.PushSubscription>();
+// Survive Next.js hot-module-replacement in development — global persists across reloads
+const g = global as typeof global & { __pushSubs?: Map<string, webpush.PushSubscription> };
+if (!g.__pushSubs) g.__pushSubs = new Map();
+const subscriptions = g.__pushSubs;
 
 export function saveSubscription(sub: webpush.PushSubscription) {
   subscriptions.set(sub.endpoint, sub);
