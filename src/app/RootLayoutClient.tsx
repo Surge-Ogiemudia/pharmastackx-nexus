@@ -1,7 +1,7 @@
 'use client';
 
-import React from 'react';
-import { ThemeProvider, CssBaseline } from '@mui/material';
+import React, { useState, useEffect } from 'react';
+import { ThemeProvider, CssBaseline, Button, IconButton, Typography } from '@mui/material';
 import { theme } from '@/theme/theme';
 import { NexusBrainProvider } from '@/components/NexusBrainProvider';
 import Navigation from '@/components/Navigation';
@@ -10,6 +10,133 @@ import { Box } from '@mui/material';
 import { useNexusBrain } from '@/components/NexusBrainProvider';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePathname } from 'next/navigation';
+import NotificationsIcon from '@mui/icons-material/Notifications';
+import CloseIcon from '@mui/icons-material/Close';
+
+function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const arr = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i++) arr[i] = rawData.charCodeAt(i);
+  return arr.buffer;
+}
+
+function NotificationBanner() {
+  const [show, setShow] = useState(false);
+
+  useEffect(() => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+    if (Notification.permission === 'granted') {
+      // Silently re-post existing subscription — server may have restarted and lost it
+      navigator.serviceWorker.register('/sw.js')
+        .then((reg) => reg.pushManager.getSubscription())
+        .then((sub) => {
+          if (sub) fetch('/api/push-subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(sub),
+          });
+        })
+        .catch(() => {});
+      return;
+    }
+
+    if (Notification.permission === 'denied') return;
+
+    // permission === 'default' — show banner only once
+    if (!localStorage.getItem('psx_notif_asked')) setShow(true);
+  }, []);
+
+  const handleAllow = async () => {
+    setShow(false);
+    localStorage.setItem('psx_notif_asked', 'prompted');
+    try {
+      const permission = await Notification.requestPermission();
+      localStorage.setItem('psx_notif_asked', permission);
+      if (permission !== 'granted') return;
+      const reg = await navigator.serviceWorker.register('/sw.js');
+      await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!),
+      });
+      await fetch('/api/push-subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sub),
+      });
+    } catch (err) {
+      console.error('[push-subscribe]', err);
+    }
+  };
+
+  const handleDismiss = () => {
+    setShow(false);
+    localStorage.setItem('psx_notif_asked', 'dismissed');
+  };
+
+  return (
+    <AnimatePresence>
+      {show && (
+        <Box
+          component={motion.div}
+          initial={{ y: 80, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={{ y: 80, opacity: 0 }}
+          // @ts-expect-error framer-motion prop on Box
+          transition={{ type: 'spring', stiffness: 320, damping: 30 }}
+          sx={{
+            position: 'fixed',
+            bottom: { xs: 68, md: 24 },
+            left: 16,
+            right: 16,
+            zIndex: 1400,
+            maxWidth: 480,
+            mx: 'auto',
+          }}
+        >
+          <Box sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5,
+            px: 2,
+            py: 1.25,
+            borderRadius: '14px',
+            bgcolor: '#0D1526',
+            border: '1px solid rgba(0,229,160,0.25)',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.55)',
+          }}>
+            <Box sx={{
+              width: 32, height: 32, borderRadius: '8px', flexShrink: 0,
+              bgcolor: 'rgba(0,229,160,0.1)', border: '1px solid rgba(0,229,160,0.2)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <NotificationsIcon sx={{ fontSize: 16, color: '#00E5A0' }} />
+            </Box>
+            <Typography sx={{ flex: 1, fontSize: '0.8rem', color: '#CBD5E1', lineHeight: 1.4 }}>
+              Allow notifications for the full experience
+            </Typography>
+            <Button size="small" variant="contained" onClick={handleAllow}
+              sx={{
+                bgcolor: '#00E5A0', color: '#0F172A', fontWeight: 700,
+                fontSize: '0.75rem', textTransform: 'none',
+                borderRadius: '8px', px: 1.5, py: 0.5, flexShrink: 0,
+                '&:hover': { bgcolor: '#00C987' },
+              }}>
+              Allow
+            </Button>
+            <IconButton size="small" onClick={handleDismiss}
+              sx={{ color: '#475569', p: 0.25, flexShrink: 0, '&:hover': { color: '#94A3B8' } }}>
+              <CloseIcon sx={{ fontSize: 16 }} />
+            </IconButton>
+          </Box>
+        </Box>
+      )}
+    </AnimatePresence>
+  );
+}
 
 function AppShell({ children }: { children: React.ReactNode }) {
   const { demoMode } = useNexusBrain();
@@ -57,6 +184,8 @@ function AppShell({ children }: { children: React.ReactNode }) {
           )}
         </Box>
       </Box>
+
+      <NotificationBanner />
 
       {/* Spacer that matches the mobile bottom nav height so content never
           slides under it. Hidden on desktop. */}

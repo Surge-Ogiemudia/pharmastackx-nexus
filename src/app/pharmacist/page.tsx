@@ -474,69 +474,6 @@ export default function PharmacistPage() {
       </Box>
       </Box>
 
-      {/* Push notification permission modal — auto-opens on first visit */}
-      <Dialog
-        open={notifStatus === 'idle'}
-        onClose={() => setNotifStatus('denied')}
-        slotProps={{
-          paper: {
-            sx: {
-              bgcolor: '#0D1526',
-              border: '1px solid rgba(0,229,160,0.25)',
-              borderRadius: '20px',
-              maxWidth: 360,
-              width: '100%',
-              m: 2,
-            },
-          },
-        }}
-      >
-        <DialogContent sx={{ p: 3, textAlign: 'center' }}>
-          <Box
-            sx={{
-              width: 52, height: 52, borderRadius: '50%',
-              bgcolor: 'rgba(0,229,160,0.1)',
-              border: '1px solid rgba(0,229,160,0.25)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              mx: 'auto', mb: 2,
-            }}
-          >
-            <NotificationsActiveIcon sx={{ color: '#00E5A0', fontSize: 26 }} />
-          </Box>
-          <Typography variant="h6" sx={{ fontWeight: 700, color: '#E0F2F1', mb: 1 }}>
-            Enable Pharmacist Alerts
-          </Typography>
-          <Typography sx={{ color: '#94A3B8', fontSize: '0.85rem', lineHeight: 1.6, mb: 0.75 }}>
-            PharmaStackX will send you an instant OS notification whenever a patient requests medicine nearby.
-          </Typography>
-          <Typography sx={{ color: '#00E5A0', fontSize: '0.78rem', fontWeight: 600, mb: 2.5 }}>
-            ✦ Gemma 4 writes each alert in real time
-          </Typography>
-          <Button
-            fullWidth
-            variant="contained"
-            disabled={notifStatus === 'requesting'}
-            onClick={enableNotifications}
-            sx={{
-              bgcolor: '#00E5A0', color: '#0F172A', fontWeight: 700,
-              textTransform: 'none', borderRadius: '12px', py: 1.1,
-              fontSize: '0.95rem', mb: 1,
-              '&:hover': { bgcolor: '#00C987' },
-              '&.Mui-disabled': { bgcolor: 'rgba(0,229,160,0.2)', color: '#334155' },
-            }}
-          >
-            {notifStatus === 'requesting' ? 'Requesting…' : 'Enable Notifications'}
-          </Button>
-          <Button
-            fullWidth variant="text" size="small"
-            onClick={() => setNotifStatus('denied')}
-            sx={{ color: '#475569', textTransform: 'none', fontSize: '0.8rem' }}
-          >
-            Skip for now
-          </Button>
-        </DialogContent>
-      </Dialog>
-
       {/* Per-medicine response dialog */}
       <Dialog
         open={!!responding}
