@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
     if (!medicines?.length || !location || !requestId) {
       return NextResponse.json({ error: 'medicines, location, and requestId are required' }, { status: 400 });
     }
-    const subCount = getSubscriptionCount();
+    const subCount = await getSubscriptionCount();
     if (subCount === 0) {
       return NextResponse.json({ ok: true, sent: 0, message: 'No subscribers yet' });
     }

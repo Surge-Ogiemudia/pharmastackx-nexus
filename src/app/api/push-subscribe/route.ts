@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
     if (!sub?.endpoint) {
       return NextResponse.json({ error: 'Invalid subscription object' }, { status: 400 });
     }
-    saveSubscription(sub);
+    await saveSubscription(sub);
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error('[push-subscribe]', err);

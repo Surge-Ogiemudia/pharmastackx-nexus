@@ -35,7 +35,7 @@ export async function notifyPharmacists(
   location: string,
   requestId: string,
 ): Promise<void> {
-  if (getSubscriptionCount() === 0) return;
+  if (await getSubscriptionCount() === 0) return;
   const body = await buildNotificationBody(medicines, location);
   await sendPushToAll({ title: 'PharmaStackX · New Request', body, requestId });
 }
