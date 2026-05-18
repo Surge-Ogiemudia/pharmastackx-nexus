@@ -1180,7 +1180,7 @@ function MessageBubble({ msg, onSuggestedAction, onRetry, onSpeak, isScanningMsg
             px: 2, py: 1.5,
             borderRadius: isUser ? '16px 4px 16px 16px' : '4px 16px 16px 16px',
             bgcolor: isUser ? 'rgba(96,165,250,0.1)' : msg.isError ? 'rgba(239,68,68,0.05)' : 'rgba(255,255,255,0.04)',
-            border: `1px solid ${isUser ? 'rgba(96,165,250,0.15)' : msg.isError ? 'rgba(239,68,68,0.2)' : msg.flagged ? 'rgba(251,191,36,0.25)' : 'rgba(255,255,255,0.06)'}`,
+            border: `1px solid ${isUser ? 'rgba(96,165,250,0.15)' : msg.isError ? 'rgba(239,68,68,0.2)' : 'rgba(255,255,255,0.06)'}`,
           }}>
             {msg.imagePreview && (
               <Box sx={{ position: 'relative', display: 'inline-block', mb: msg.text ? 1 : 0, width: '100%' }}>
@@ -1257,15 +1257,6 @@ function MessageBubble({ msg, onSuggestedAction, onRetry, onSpeak, isScanningMsg
               )}
             </Box>
           </Box>
-          {msg.role === 'ai' && msg.flagged && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, px: 1, py: 0.5, borderRadius: '6px', bgcolor: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.15)' }}>
-              <Typography sx={{ fontSize: '0.6rem' }}>⚠️</Typography>
-              <Typography sx={{ fontSize: '0.62rem', color: '#FBBF24', fontWeight: 600 }}>AI response flagged for review</Typography>
-              {msg.patternsDetected && msg.patternsDetected.length > 0 && (
-                <Typography sx={{ fontSize: '0.58rem', color: '#64748B' }}>({msg.patternsDetected.join(', ')})</Typography>
-              )}
-            </Box>
-          )}
         </Box>
 
         {/* Prominent speak button — beside the bubble, visible to everyone */}
