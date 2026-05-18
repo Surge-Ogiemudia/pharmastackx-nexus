@@ -1,16 +1,15 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
-import { Box, Typography, Card, CardContent, CardActionArea, Chip } from '@mui/material';
+import React, { useState, useEffect } from 'react';
+import { Box, Typography, Card, CardContent, CardActionArea } from '@mui/material';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import ChatIcon from '@mui/icons-material/Chat';
 import SearchIcon from '@mui/icons-material/Search';
-import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
+import Image from 'next/image';
 import { useNexusBrain } from '@/components/NexusBrainProvider';
 
 const CYCLING_WORDS = ['unfindable', 'unavailable', 'inaccessible'];
-const PHOTO_KEY = 'psx_hero_photo';
 
 const features = [
   {
@@ -40,7 +39,7 @@ function MissionStatement() {
   }, []);
 
   return (
-    <Box sx={{ mt: 2.5 }}>
+    <Box sx={{ mt: 1 }}>
       <Typography
         sx={{
           fontSize: { xs: '1.05rem', md: '1.35rem' },
@@ -74,124 +73,48 @@ function MissionStatement() {
 }
 
 function PhotoSection() {
-  const [photo, setPhoto] = useState<string | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const saved = localStorage.getItem(PHOTO_KEY);
-    if (saved) setPhoto(saved);
-  }, []);
-
-  const handleFile = (file: File) => {
-    if (!file.type.startsWith('image/')) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const result = e.target?.result as string;
-      localStorage.setItem(PHOTO_KEY, result);
-      setPhoto(result);
-    };
-    reader.readAsDataURL(file);
-  };
-
-  if (photo) {
-    return (
-      <motion.div
-        initial={{ opacity: 0, scale: 0.98 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.6, ease: 'easeOut' }}
-      >
-        <Box
-          sx={{
-            width: '100%',
-            mb: 4,
-            borderRadius: '18px',
-            overflow: 'hidden',
-            border: '1px solid rgba(255,255,255,0.07)',
-            boxShadow: '0 8px 48px rgba(0,0,0,0.5)',
-            position: 'relative',
-          }}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={photo}
-            alt="Team"
-            style={{ width: '100%', display: 'block', maxHeight: 360, objectFit: 'cover' }}
-          />
-          {/* subtle gradient overlay at bottom for legibility */}
-          <Box
-            sx={{
-              position: 'absolute',
-              bottom: 0,
-              left: 0,
-              right: 0,
-              height: 60,
-              background: 'linear-gradient(to top, rgba(9,14,26,0.6), transparent)',
-            }}
-          />
-        </Box>
-      </motion.div>
-    );
-  }
-
   return (
     <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.45, delay: 0.25 }}
+      initial={{ opacity: 0, scale: 0.99 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.7, ease: 'easeOut' }}
     >
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        style={{ display: 'none' }}
-        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
-      />
       <Box
-        onClick={() => inputRef.current?.click()}
-        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-        onDragLeave={() => setIsDragging(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setIsDragging(false);
-          const f = e.dataTransfer.files?.[0];
-          if (f) handleFile(f);
-        }}
         sx={{
           width: '100%',
-          mb: 4,
-          py: 5,
+          mb: 2.5,
           borderRadius: '18px',
-          border: `1.5px dashed ${isDragging ? 'rgba(0,229,160,0.5)' : 'rgba(255,255,255,0.08)'}`,
-          bgcolor: isDragging ? 'rgba(0,229,160,0.03)' : 'rgba(15,23,42,0.35)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 1.5,
-          cursor: 'pointer',
-          transition: 'all 0.2s ease',
-          '&:hover': {
-            border: '1.5px dashed rgba(0,229,160,0.3)',
-            bgcolor: 'rgba(0,229,160,0.02)',
-          },
+          overflow: 'hidden',
+          position: 'relative',
+          border: '1px solid rgba(255,255,255,0.05)',
+          boxShadow: '0 4px 40px rgba(0,0,0,0.6)',
         }}
       >
-        <AddPhotoAlternateIcon sx={{ fontSize: 32, color: 'rgba(255,255,255,0.15)' }} />
-        <Typography sx={{ fontSize: '0.8rem', color: '#334155', textAlign: 'center' }}>
-          Drop a photo here — saved permanently once uploaded
-        </Typography>
-        <Chip
-          label="Choose photo"
-          size="small"
-          sx={{
-            bgcolor: 'rgba(0,229,160,0.07)',
-            border: '1px solid rgba(0,229,160,0.18)',
-            color: '#00E5A0',
-            fontSize: '0.7rem',
-            pointerEvents: 'none',
+        <Image
+          src="/impactimages.png"
+          alt="PharmaStackX Impact"
+          width={1200}
+          height={400}
+          style={{
+            width: '100%',
+            height: 'auto',
+            maxHeight: 180,
+            objectFit: 'cover',
+            display: 'block',
+            filter: 'brightness(0.55) saturate(0.7)',
           }}
+          priority
         />
+        {/* top fade — blends into page background */}
+        <Box sx={{
+          position: 'absolute', top: 0, left: 0, right: 0, height: 80,
+          background: 'linear-gradient(to bottom, #090E1A, transparent)',
+        }} />
+        {/* bottom fade */}
+        <Box sx={{
+          position: 'absolute', bottom: 0, left: 0, right: 0, height: 80,
+          background: 'linear-gradient(to top, #090E1A, transparent)',
+        }} />
       </Box>
     </motion.div>
   );
@@ -207,8 +130,8 @@ export default function NexusHub() {
         height: '100%',
         overflow: 'auto',
         px: { xs: 3, md: 5 },
-        pt: { xs: 4, md: 5 },
-        pb: 6,
+        pt: { xs: 2, md: 3 },
+        pb: 4,
         background: [
           'radial-gradient(ellipse at 15% 40%, rgba(27,94,32,0.10) 0%, transparent 55%)',
           'radial-gradient(ellipse at 85% 80%, rgba(96,165,250,0.05) 0%, transparent 50%)',
@@ -217,12 +140,12 @@ export default function NexusHub() {
     >
       {/* ── Hero ── */}
       <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
-        <Box sx={{ mb: 4 }}>
+        <Box sx={{ mb: 2 }}>
           <Typography
             variant="h3"
             sx={{
               fontWeight: 900,
-              fontSize: { xs: '2rem', md: '2.8rem' },
+              fontSize: { xs: '1.6rem', md: '2.1rem' },
               background: 'linear-gradient(135deg, #4CAF50 0%, #00E5A0 45%, #60A5FA 100%)',
               backgroundClip: 'text',
               WebkitBackgroundClip: 'text',
