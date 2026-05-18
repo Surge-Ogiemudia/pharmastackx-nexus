@@ -9,7 +9,7 @@ const INSTRUCTION_SIGNALS = [
   'Do not show reasoning', 'Never show reasoning', 'thinking steps', 'internal monologue',
   'Never echo', 'FORMAT —', 'GUARDRAILS', 'non-negotiable', 'NEVER say',
   'consult a doctor', 'seek professional advice', 'Direct and confident', 'TONE:',
-  'Final Answer:', '* Role:', '* Constraints:', '* User:', '* Self-Correction:',
+  'Final Answer:', 'Final check', 'Quick check', '* Role:', '* Constraints:', '* User:', '* Self-Correction:',
   '* Option 1:', '* Option 2:', 'Max 3 sentences?', 'Start immediately?',
   // Model sometimes echoes system rules as self-check questions
   'direct answer in', '1-3 sentences', 'sign-offs', 'no greetings', 'no disclaimer',
