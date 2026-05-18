@@ -13,12 +13,15 @@ const INSTRUCTION_SIGNALS = [
   '* Option 1:', '* Option 2:', 'Max 3 sentences?', 'Start immediately?',
   // Model sometimes echoes system rules as self-check questions
   'direct answer in', '1-3 sentences', 'sign-offs', 'no greetings', 'no disclaimer',
+  // Meta-labels and self-checks the model echoes
+  'Clinical accuracy', 'voice language', 'Language:',
 ];
 
 // Line-start patterns that signal the model is narrating its own reasoning, not answering
 const REASONING_STARTS = [
   "let's ", "i'll ", "let me ", "i will ", "i should ", "going with", "i'm going",
   "so the answer", "so my answer", "the answer is", "my answer",
+  "wait,", "actually,",
 ];
 
 function clean(raw: string): string {
@@ -28,6 +31,9 @@ function clean(raw: string): string {
 
   // Strip <thinking> blocks
   let text = raw.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
+
+  // Strip inline parenthetical self-corrections e.g. "(Wait, let's make it more concise...)"
+  text = text.replace(/\([^)]*(?:wait|let me|let's|i should|i'll|actually|concise|revis|rephras)[^)]*\)/gi, '').trim();
 
   // Filter out reasoning lines — bullets, echoed instructions, or model self-commentary.
   text = text.split('\n')
@@ -49,7 +55,13 @@ function clean(raw: string): string {
   // Words >4 chars are the signal — filler words like "the", "and" are ignored.
   const sentences = text.split(/(?<=[.!?])\s+/)
     .map(s => s.replace(/^["'"]+\s*/, '').trim())
-    .filter(s => s.length > 10);
+    .filter(s => s.length > 10)
+    .filter(s => {
+      // Sentence-level pass of the same filters (catches leaked prefixes like "Clinical accuracy? Language: Hausa.")
+      const lower = s.toLowerCase();
+      if (REASONING_STARTS.some(p => lower.startsWith(p))) return false;
+      return !INSTRUCTION_SIGNALS.some(sig => lower.includes(sig.toLowerCase()));
+    });
   const result: string[] = [];
   const seenWords = new Set<string>();
   for (const s of sentences) {
