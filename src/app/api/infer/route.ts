@@ -51,6 +51,10 @@ function clean(raw: string): string {
   // Strip quote characters the model uses to wrap its response (e.g. leading/trailing ")
   text = text.replace(/^["'"]+\s*/, '').replace(/\s*["'"]+$/, '');
 
+  // Remove quotes immediately after sentence-end punctuation — they block the sentence splitter.
+  // e.g. `combination."\nYes,` → `combination.\nYes,` so the duplicate is detected.
+  text = text.replace(/([.!?])["'"]+(\s)/g, '$1$2').replace(/([.!?])["'"]+$/gm, '$1');
+
   // Take sentences until we hit a near-duplicate (model outputting a revised version of its answer).
   // Words >4 chars are the signal — filler words like "the", "and" are ignored.
   const sentences = text.split(/(?<=[.!?])\s+/)
