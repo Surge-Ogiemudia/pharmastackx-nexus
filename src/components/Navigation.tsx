@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   Box, Typography, IconButton, Tooltip, Divider, CircularProgress,
@@ -76,15 +77,9 @@ export default function Navigation() {
         {/* Logo */}
         <Box
           onClick={() => router.push('/')}
-          sx={{
-            width: 40, height: 40, borderRadius: '10px',
-            background: 'linear-gradient(135deg, #1B5E20 0%, #00E5A0 100%)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            mb: 2, cursor: 'pointer',
-            boxShadow: '0 0 20px rgba(0,229,160,0.3)',
-          }}
+          sx={{ width: 40, height: 40, mb: 2, cursor: 'pointer', flexShrink: 0 }}
         >
-          <Typography sx={{ fontWeight: 900, fontSize: '1rem', color: '#fff' }}>N</Typography>
+          <Image src="/nexus.png" alt="Nexus" width={40} height={40} style={{ borderRadius: 10, display: 'block' }} />
         </Box>
 
         {NAV_ITEMS.map(({ path, Icon, label }) => {

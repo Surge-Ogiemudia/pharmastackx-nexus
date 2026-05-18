@@ -10,6 +10,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
+  icons: { icon: '/nexus.png', apple: '/nexus.png' },
   title: 'PharmaStackX Nexus — AI-Powered Medicine Discovery',
   description:
     'PharmaStackX Nexus uses Gemma 4 to connect patients to medicine wherever they are. Offline-capable, multilingual, built for the world.',

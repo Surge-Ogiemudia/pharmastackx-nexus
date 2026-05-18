@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createRequest, getAllActive } from '@/lib/dispatch-store';
-import { notifyPharmacists } from '@/lib/push-notify';
 
 export const maxDuration = 30;
 
@@ -14,12 +13,6 @@ export async function POST(req: NextRequest) {
       );
     }
     const id = await createRequest({ medicines, userState, userPhone, patientNotes: patientNotes ?? undefined });
-
-    // Await the push — fire-and-forget was being killed by Vercel before it completed.
-    // Template body keeps this under 1s; no AI call in this path.
-    await notifyPharmacists(medicines, userState, id).catch((err) =>
-      console.error('[dispatch notify]', err)
-    );
 
     return NextResponse.json({ requestId: id });
   } catch (err) {
